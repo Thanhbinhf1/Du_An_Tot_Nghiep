@@ -1,0 +1,16 @@
+# Node & Build
+**/node_modules/
+frontend/.next/
+frontend/out/
+backend/dist/
+backend/build/
+
+# Secret & Environment
+**/.env
+**/.env.*
+!**/.env.example
+
+# OS & Editor
+.DS_Store
+*.log
+.vscode/
