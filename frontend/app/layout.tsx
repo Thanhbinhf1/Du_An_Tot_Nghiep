@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import "./globals.css";
+import "./uniqlo-global.css";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 
