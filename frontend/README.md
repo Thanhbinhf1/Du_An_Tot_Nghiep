@@ -1,36 +1,23 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# UNIQLO-inspired frontend pages (Next.js App Router)
 
-## Getting Started
+This package contains five route page files:
 
-First, run the development server:
+- `app/page.tsx` — homepage matching the long reference screenshot (hero, category grid, campaign banners, product strips, LifeWear Week).
+- `app/cart/page.tsx` — cart.
+- `app/checkout/page.tsx` — checkout.
+- `app/wishlist/page.tsx` — wishlist/member area.
+- `app/product/[id]/page.tsx` — product detail.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+It also includes the shared header/footer, CSS, demo data and local image assets required by these pages.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Install into an existing project
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Back up your existing `frontend` directory.
+2. Copy `app`, `components`, `data`, `types`, and `public` into your existing `frontend` directory and merge folders when prompted.
+3. Keep your existing `package.json` and `tsconfig.json`.
+4. Ensure `app/layout.tsx` imports `./globals.css` and renders the shared `Header` and `Footer`. The supplied layout does this; merge it with your existing layout if you need to retain metadata/fonts.
+5. Run `npm run dev` from `frontend` and open `http://localhost:3000/`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Important: `app/page.tsx` is the homepage route `/`. The wishlist is only `app/wishlist/page.tsx` and should appear at `/wishlist`, not at `/`.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Images are demo assets, not official UNIQLO photography. This is a UI starter; backend integration is not included.
