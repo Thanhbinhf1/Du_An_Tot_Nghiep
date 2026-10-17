@@ -6,7 +6,13 @@ import express, {
 } from "express";
 import cors from "cors";
 import connectDB from "./config/db.js";
+
+import "./models/categoryModel.js";
+import "./models/brandModel.js";
+
+import productRoutes from "./routes/productRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
+
 import { notFound, errorHandler } from "./middlewares/errorMiddleware.js";
 
 const app: Application = express();
@@ -26,6 +32,7 @@ app.get("/", (_req: Request, res: Response) => {
 
 // Routes Nghiệp vụ
 app.use("/api/auth", authRoutes);
+app.use("/api/products", productRoutes);
 
 // Error Handling Middlewares (Phải nằm cuối)
 app.use(notFound);
