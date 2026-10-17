@@ -1,36 +1,19 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# UNIQLO-inspired frontend demo (Next.js App Router + TypeScript)
 
-## Getting Started
+## Chạy dự án
+1. Giải nén thư mục.
+2. Chép các thư mục `app`, `components`, `data`, `types`, `public` vào thư mục `frontend` hiện tại (nếu đã có file cùng tên, hãy sao lưu trước).
+3. Đảm bảo `package.json` có Next.js, React, React DOM và TypeScript như dự án hiện tại.
+4. Mở terminal tại thư mục frontend và chạy `npm install`, sau đó `npm run dev`.
+5. Mở `http://localhost:3000/` để xem trang chủ.
 
-First, run the development server:
+## Các trang
+- `/` trang chủ
+- `/cart` giỏ hàng
+- `/checkout` thanh toán
+- `/wishlist` yêu thích
+- `/product/458824` chi tiết sản phẩm
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+CSS dùng chung nằm ở `app/globals.css`; CSS bổ sung theo trang nằm tại `app/home.css`, `app/cart/cart.css`, `app/checkout/checkout.css`, `app/wishlist/wishlist.css`, `app/product/[id]/product.css`.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Đây là giao diện demo, chưa kết nối API/backend. Hình ảnh sản phẩm trong `public/images` được tạo cho mục đích minh họa, không phải ảnh sản phẩm chính thức của UNIQLO. Một số ảnh banner trang chủ lấy từ URL Unsplash và cần kết nối Internet để tải.

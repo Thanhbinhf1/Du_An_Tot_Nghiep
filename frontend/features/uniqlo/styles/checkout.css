@@ -1,0 +1,1 @@
+.checkout-methods{gap:12px}.method{min-height:62px;line-height:1.5}.address-card{line-height:1.8}.checkout-page .two-column{grid-template-columns:minmax(0,1fr) 320px}.checkout-page .summary-column{position:sticky;top:20px}@media(max-width:760px){.checkout-page .two-column{grid-template-columns:1fr}.checkout-page .summary-column{position:static}}
