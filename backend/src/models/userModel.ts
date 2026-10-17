@@ -1,7 +1,7 @@
-import mongoose, { Document, Schema } from "mongoose";
+import mongoose, { Schema } from "mongoose";
 import type { UserRole } from "../types/auth.js";
 
-export interface IUser extends Document {
+export interface IUser {
   name: string;
   email: string;
   password?: string;
@@ -9,6 +9,8 @@ export interface IUser extends Document {
   role: UserRole;
   is_blocked: boolean;
   auth_provider: "local" | "google";
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const userSchema = new Schema<IUser>(
@@ -39,4 +41,5 @@ const userSchema = new Schema<IUser>(
 );
 
 const User = mongoose.model<IUser>("User", userSchema);
+
 export default User;

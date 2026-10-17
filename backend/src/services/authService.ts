@@ -39,7 +39,7 @@ export class AuthService {
         name,
         email: emailFormatted,
         password: hashedPassword,
-        phone,
+        ...(phone ? { phone } : {}),
         auth_provider: "local",
       });
 

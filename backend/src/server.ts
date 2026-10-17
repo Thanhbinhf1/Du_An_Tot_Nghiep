@@ -5,7 +5,7 @@ import express, {
   type Response,
 } from "express";
 import cors from "cors";
-import connectDB from "./config/database.js";
+import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import { notFound, errorHandler } from "./middlewares/errorMiddleware.js";
 
