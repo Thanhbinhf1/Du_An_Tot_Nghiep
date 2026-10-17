@@ -1,23 +1,19 @@
-# UNIQLO-inspired frontend pages (Next.js App Router)
+# UNIQLO-inspired frontend demo (Next.js App Router + TypeScript)
 
-This package contains five route page files:
+## Chạy dự án
+1. Giải nén thư mục.
+2. Chép các thư mục `app`, `components`, `data`, `types`, `public` vào thư mục `frontend` hiện tại (nếu đã có file cùng tên, hãy sao lưu trước).
+3. Đảm bảo `package.json` có Next.js, React, React DOM và TypeScript như dự án hiện tại.
+4. Mở terminal tại thư mục frontend và chạy `npm install`, sau đó `npm run dev`.
+5. Mở `http://localhost:3000/` để xem trang chủ.
 
-- `app/page.tsx` — homepage matching the long reference screenshot (hero, category grid, campaign banners, product strips, LifeWear Week).
-- `app/cart/page.tsx` — cart.
-- `app/checkout/page.tsx` — checkout.
-- `app/wishlist/page.tsx` — wishlist/member area.
-- `app/product/[id]/page.tsx` — product detail.
+## Các trang
+- `/` trang chủ
+- `/cart` giỏ hàng
+- `/checkout` thanh toán
+- `/wishlist` yêu thích
+- `/product/458824` chi tiết sản phẩm
 
-It also includes the shared header/footer, CSS, demo data and local image assets required by these pages.
+CSS dùng chung nằm ở `app/globals.css`; CSS bổ sung theo trang nằm tại `app/home.css`, `app/cart/cart.css`, `app/checkout/checkout.css`, `app/wishlist/wishlist.css`, `app/product/[id]/product.css`.
 
-## Install into an existing project
-
-1. Back up your existing `frontend` directory.
-2. Copy `app`, `components`, `data`, `types`, and `public` into your existing `frontend` directory and merge folders when prompted.
-3. Keep your existing `package.json` and `tsconfig.json`.
-4. Ensure `app/layout.tsx` imports `./globals.css` and renders the shared `Header` and `Footer`. The supplied layout does this; merge it with your existing layout if you need to retain metadata/fonts.
-5. Run `npm run dev` from `frontend` and open `http://localhost:3000/`.
-
-Important: `app/page.tsx` is the homepage route `/`. The wishlist is only `app/wishlist/page.tsx` and should appear at `/wishlist`, not at `/`.
-
-Images are demo assets, not official UNIQLO photography. This is a UI starter; backend integration is not included.
+Đây là giao diện demo, chưa kết nối API/backend. Hình ảnh sản phẩm trong `public/images` được tạo cho mục đích minh họa, không phải ảnh sản phẩm chính thức của UNIQLO. Một số ảnh banner trang chủ lấy từ URL Unsplash và cần kết nối Internet để tải.

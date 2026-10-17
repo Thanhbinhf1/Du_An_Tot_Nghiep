@@ -1,39 +1,22 @@
-const categories = [
-  ["ÁO THUN", "Tops"], ["ÁO POLO", "Polo"], ["ÁO SƠ MI", "Shirts"],
-  ["ÁO KHOÁC", "Outerwear"], ["ÁO LEN", "Knitwear"], ["QUẦN", "Bottoms"],
-  ["JEANS", "Denim"], ["ĐỒ MẶC NHÀ", "Loungewear"], ["ĐỒ THỂ THAO", "Sport"],
-  ["PHỤ KIỆN", "Accessories"], ["LIFEWEAR", "LifeWear"], ["ƯU ĐÃI", "Offers"],
-];
-const campaigns = [
-  { image: "/images/campaign/green-collection.jpg", eyebrow: "NEW ARRIVALS", title: "Áo Polo Dry Pique", subtitle: "Thoải mái mỗi ngày", cta: "KHÁM PHÁ NGAY", products: true },
-  { image: "/images/campaign/friends-knit.jpg", eyebrow: "LIFEWEAR", title: "Phong cách của chúng ta", subtitle: "Những thiết kế dành cho mọi khoảnh khắc", cta: "TÌM HIỂU THÊM" },
-  { image: "/images/campaign/friends-outdoor.jpg", eyebrow: "SPRING / SUMMER", title: "Mặc đẹp theo cách của bạn", subtitle: "Dễ phối đồ, dễ vận động, dễ chịu cả ngày", cta: "XEM BỘ SƯU TẬP", products: true },
-  { image: "/images/campaign/denim-group.jpg", eyebrow: "DENIM EDIT", title: "Denim cho mọi ngày", subtitle: "Phom dáng hiện đại, cảm giác thoải mái", cta: "KHÁM PHÁ DENIM" },
-  { image: "/images/campaign/blue-shirt.jpg", eyebrow: "NEW SEASON", title: "Đơn giản là đẹp", subtitle: "Những món đồ cơ bản không thể thiếu", cta: "MUA NGAY", products: true },
-  { image: "/images/campaign/guitar-style.jpg", eyebrow: "YOUR LIFEWEAR", title: "Tự do thể hiện cá tính", subtitle: "Chất liệu và kiểu dáng cho phong cách riêng", cta: "KHÁM PHÁ" },
-  { image: "/images/campaign/couple-casual.jpg", eyebrow: "EVERYDAY STYLE", title: "Cùng nhau tạo nên phong cách", subtitle: "Trang phục cho những ngày bình thường thật đẹp", cta: "XEM THÊM" },
-  { image: "/images/campaign/knitwear.jpg", eyebrow: "COMFORT FIRST", title: "Ấm áp từ những điều giản dị", subtitle: "Chất liệu mềm mại, kiểu dáng vượt thời gian", cta: "KHÁM PHÁ NGAY" },
-  { image: "/images/campaign/winter-jacket.jpg", eyebrow: "SEASONAL PICKS", title: "Sẵn sàng cho mọi thời tiết", subtitle: "Lớp áo nhẹ, ấm và linh hoạt", cta: "XEM BỘ SƯU TẬP" },
-  { image: "/images/campaign/lifewear-week.jpg", eyebrow: "UNIQLO", title: "LifeWear Week", subtitle: "Trang phục tốt hơn cho cuộc sống tốt hơn", cta: "TÌM HIỂU THÊM", gold: true },
-];
-const productImages = [
-  ["/images/polo-brown.jpg", "Áo Polo Cotton", "588.000 VND"],
-  ["/images/jacket-sage.jpg", "Áo khoác dáng ngắn", "1.471.000 VND"],
-  ["/images/shirt-cream.jpg", "Áo thun tay dài", "391.000 VND"],
-  ["/images/sweater-green.jpg", "Áo len LifeWear", "790.000 VND"],
-];
-function ProductStrip({ title = "Gợi ý dành cho bạn" }: { title?: string }) {
-  return <section className="home-products"><div className="section-heading"><h2>{title}</h2><a href="/product/458824">Xem tất cả <span>→</span></a></div><div className="home-product-grid">{productImages.map(([src,name,price])=><a className="home-product" href="/product/458824" key={name}><img src={src} alt={name}/><div className="swatches"><i/><i/><i/><i/><span>♡</span></div><p className="muted">Nam, XS–XXL</p><h3>{name}</h3><strong>{price}</strong><small>★ 4.8 (120+)</small></a>)}</div></section>;
-}
-export default function Home() {
-  return <main className="home-page">
-    <section className="home-hero"><img src="/images/campaign/hero-city.jpg" alt="Bộ sưu tập thời trang đường phố"/><div className="hero-copy"><span>LifeWear / New season</span><h1>Đơn giản, thoải mái<br/>mỗi ngày</h1><p>Những thiết kế dành cho cuộc sống chuyển động.</p><a href="/product/458824" className="hero-button">KHÁM PHÁ NGAY</a></div><div className="hero-dots">●　○　○　○</div></section>
-    <section className="category-section"><div className="section-heading"><h2>THỂ LOẠI</h2><a href="/product/458824">Xem tất cả →</a></div><div className="category-grid">{categories.map(([name,sub],i)=><a href="/product/458824" className="category-item" key={name}><span className={"category-icon icon-"+i}>{["◉","▱","▥","♧","♨","▤","▰","⌂","◌","◇","U","★"][i]}</span><strong>{name}</strong><small>{sub}</small></a>)}</div><a className="outline-pill" href="/product/458824">XEM TẤT CẢ SẢN PHẨM</a></section>
-    {campaigns.map((c,i)=><div className="campaign-block" key={c.image}>
-      <a className={"campaign-banner "+(c.gold?"gold-banner":"")} href="/product/458824"><img src={c.image} alt={c.title}/><div className="campaign-copy"><span>{c.eyebrow}</span><h2>{c.title}</h2><p>{c.subtitle}</p><b>{c.cta}　→</b></div></a>
-      {c.products && <ProductStrip title={i===0?"Mới nhất":i===2?"Phong cách nổi bật":"Được yêu thích"}/>}
-    </div>)}
-    <section className="lifewear-panel"><div><span>LifeWear</span><h2>Trang phục tốt hơn<br/>cho cuộc sống tốt hơn.</h2><p>Thiết kế tinh giản, chất lượng bền lâu và sự thoải mái mỗi ngày.</p><a href="/product/458824">KHÁM PHÁ LIFEWEAR →</a></div><img src="/images/campaign/lifewear-week.jpg" alt="LifeWear Week"/></section>
+import Link from "next/link";
+import "./home.css";
 
-  </main>;
-}
+const categories = ["Áo khoác", "Áo thun", "Áo sơ mi", "Quần dài", "Đồ mặc nhà", "Phụ kiện", "Trang phục nữ", "Trang phục nam", "Trẻ em", "LifeWear", "UT graphic", "Bộ sưu tập"];
+const campaigns = [
+ {title:"Mặc đẹp mỗi ngày", subtitle:"Những thiết kế thoải mái cho cuộc sống thường nhật.", image:"https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1800&q=85", tag:"LIFEWEAR"},
+ {title:"Phong cách của riêng bạn", subtitle:"Khám phá những món đồ dễ phối cho mùa mới.", image:"https://images.unsplash.com/photo-1523398002811-999ca8dec234?auto=format&fit=crop&w=1800&q=85", tag:"NEW ARRIVALS"},
+ {title:"Cùng nhau tạo nên phong cách", subtitle:"Các thiết kế đơn giản, linh hoạt cho mọi ngày.", image:"https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=1800&q=85", tag:"COLLECTION"},
+ {title:"Thoải mái trong từng chuyển động", subtitle:"Chất liệu và kiểu dáng phù hợp với nhịp sống năng động.", image:"https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1800&q=85", tag:"FEATURED"}
+];
+const products = [
+ {name:"Áo Polo Vải Piqué", price:"588.000 VND", image:"/images/polo-brown.jpg"},
+ {name:"Áo khoác chần bông", price:"1.471.000 VND", image:"/images/jacket-sage.jpg"},
+ {name:"Áo thun dài tay", price:"391.000 VND", image:"/images/shirt-cream.jpg"},
+ {name:"Áo len LifeWear", price:"588.000 VND", image:"/images/sweater-green.jpg"}
+];
+export default function HomePage(){return <div className="home-page">
+  <section className="home-hero"><img src="https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=2000&q=90" alt="Bộ sưu tập thời trang mới"/><div className="hero-copy"><span>NEW SEASON</span><h1>LifeWear<br/>for everyone</h1><p>Thiết kế tối giản, thoải mái cho mỗi ngày.</p><Link className="hero-button" href="/product/458824">KHÁM PHÁ NGAY</Link></div></section>
+  <section className="category-section"><h2>Khám phá theo danh mục</h2><div className="category-grid">{categories.map((c,i)=><Link className="category-item" href={i%2?"/product/458824":"/wishlist"} key={c}><span className="category-icon">{["♧","◉","▤","▥","⌂","✦"][i%6]}</span><span>{c}</span></Link>)}</div><Link className="category-more" href="/wishlist">Xem tất cả danh mục　→</Link></section>
+  {campaigns.map((c,i)=><section className={'campaign-block campaign-'+i} key={c.tag}><Link href="/product/458824" className="campaign-banner"><img src={c.image} alt={c.title}/><div className="campaign-copy"><span>{c.tag}</span><h2>{c.title}</h2><p>{c.subtitle}</p><b>KHÁM PHÁ THÊM　→</b></div></Link>{i===0||i===1?<div className="home-products"><div className="section-heading"><h2>{i===0?"Được yêu thích":"Sản phẩm nổi bật"}</h2><Link href="/wishlist">Xem tất cả →</Link></div><div className="home-product-grid">{products.slice(i, i+3).concat(i===0?[products[3]]:[]).map((x,j)=><Link className="home-product" href="/product/458824" key={x.name}><img src={x.image} alt={x.name}/><div className="home-product-meta">Nam, XS–XXL</div><h3>{x.name}</h3><strong>{x.price}</strong><div className="home-rating">★ 4.8 <span>(99+)</span></div></Link>)}</div></div>:null}</section>)}
+  <section className="lifewear-panel"><div><span>UNIQLO SPECIAL</span><h2>LifeWear Week</h2><p>Những món đồ thiết yếu để hoàn thiện phong cách của bạn.</p><Link className="hero-button" href="/wishlist">MUA SẮM NGAY</Link></div><img src="https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1200&q=85" alt="LifeWear Week"/></section>
+</div>}

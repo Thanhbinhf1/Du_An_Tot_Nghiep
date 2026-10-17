@@ -1,3 +1,43 @@
 "use client";
-import {useState} from "react";import Link from "next/link";import ProductCard from "@/components/product/ProductCard";import {formatVnd,products} from "@/data/products";
-export default function WishlistPage(){const[tab,setTab]=useState<"products"|"style">("products");const[favorite,setFavorite]=useState(true);return <div className="container"><div className="wishlist-layout"><aside className="account-menu"><h3>Tư cách thành viên</h3><a href="#history">Lịch sử mua hàng</a><a href="#coupons">Phiếu giảm giá</a><Link href="/wishlist">Yêu thích</Link><a href="#reviews">Đánh giá đã đăng</a><a href="#online">Khảo sát dịch vụ đặt hàng online</a><h3 style={{marginTop:24}}>Cài đặt hồ sơ</h3><a href="#profile">Hồ sơ</a><a href="#address">Sổ địa chỉ</a><a href="#password">Thay đổi mật khẩu</a><a href="#cards">Thẻ của tôi</a><a href="#settings">Cài đặt tùy chọn</a><a href="#membership">Hủy bỏ thành viên</a></aside><section><h1 className="page-title wishlist-heading">Yêu thích</h1><div className="tabs"><button className={`tab ${tab==="products"?"active":""}`} onClick={()=>setTab("products")}>Sản phẩm</button><button className={`tab ${tab==="style"?"active":""}`} onClick={()=>setTab("style")}>Phong cách</button></div>{tab==="products"?<><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,margin:"8px 0 12px"}}><span>Kết quả: {favorite?1:0} sản phẩm</span><button className="text-button" onClick={()=>setFavorite(v=>!v)}>↧ Sắp xếp theo</button></div>{favorite?<article className="wishlist-result"><Link href={`/product/${products[0].id}`}><img src={products[0].image} alt={products[0].name}/></Link><div className="wishlist-result-info"><h3>{products[0].name} | Cổ Lọ</h3><div>Mã sản phẩm: {products[0].code}</div><div>Màu sắc: {products[0].color}</div><div>Kích cỡ: Nữ M</div><p>{formatVnd(products[0].price)}</p></div><button className="heart active wishlist-heart" aria-label="Xóa khỏi yêu thích" onClick={()=>setFavorite(false)}>♥</button><Link className="pill-button dark wishlist-add" href="/cart">THÊM VÀO GIỎ HÀNG</Link></article>:<div className="empty-state">Bạn chưa có sản phẩm yêu thích. <button className="text-button" onClick={()=>setFavorite(true)}>Khôi phục sản phẩm mẫu</button></div>}<section className="wishlist-recent"><h2 className="section-title">Đã xem gần đây</h2><div className="product-grid">{products.slice(1).map(p=><ProductCard key={p.id} product={p}/>)}</div></section></>:<div className="empty-state">Bạn chưa lưu phong cách nào.</div>}</section></div></div>}
+
+import { useState } from "react";
+import Link from "next/link";
+import ProductCard from "@/components/product/ProductCard";
+import { products } from "@/data/products";
+
+import "./wishlist.css";
+
+export default function WishlistPage() {
+  const [tab, setTab] = useState<"products" | "style">("products");
+  return (
+    <div className="container">
+      <div className="wishlist-layout">
+        <aside className="account-menu">
+          <h3>Tư cách thành viên</h3>
+          <a href="#history">Lịch sử mua hàng</a><a href="#coupons">Phiếu giảm giá</a>
+          <Link href="/wishlist">Yêu thích</Link><a href="#reviews">Đánh giá đã đăng</a>
+          <a href="#online">Khảo sát dịch vụ đặt hàng online</a>
+          <h3>Cài đặt hồ sơ</h3>
+          <a href="#profile">Hồ sơ</a><a href="#address">Sổ địa chỉ</a><a href="#password">Thay đổi mật khẩu</a>
+        </aside>
+        <section>
+          <h1 className="page-title">Yêu thích</h1>
+          <div className="tabs">
+            <button className={`tab ${tab === "products" ? "active" : ""}`} onClick={() => setTab("products")}>Sản phẩm</button>
+            <button className={`tab ${tab === "style" ? "active" : ""}`} onClick={() => setTab("style")}>Phong cách</button>
+          </div>
+          {tab === "products" ? (
+            <>
+              <p className="small">Kết quả: 1 sản phẩm</p>
+              <div className="product-grid">{products.slice(0, 1).map(p => <ProductCard key={p.id} product={p} />)}</div>
+              <div style={{ marginTop: 36 }}>
+                <h2 className="section-title">Đã xem gần đây</h2>
+                <div className="product-grid">{products.slice(1).map(p => <ProductCard key={p.id} product={p} />)}</div>
+              </div>
+            </>
+          ) : <div className="empty-state">Bạn chưa lưu phong cách nào.</div>}
+        </section>
+      </div>
+    </div>
+  );
+}

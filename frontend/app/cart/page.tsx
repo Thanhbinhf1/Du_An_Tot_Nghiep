@@ -1,9 +1,52 @@
 "use client";
+
 import { useState } from "react";
 import Link from "next/link";
 import FraudWarning from "@/components/layout/FraudWarning";
 import OrderSummary from "@/components/cart/OrderSummary";
 import ProductCard from "@/components/product/ProductCard";
 import { formatVnd, products } from "@/data/products";
-const shelves = [{title:"Đã xem gần đây",items:[products[1],products[2],products[3]]},{title:"Sản Phẩm Gợi Ý Theo Giỏ Hàng",items:[products[3],products[1],products[0],products[2]]},{title:"Men Sản Phẩm Bán Chạy",items:[products[1],products[2],products[0],products[3]]},{title:"Hoàn Thiện Phong Cách",items:[products[2],products[3],products[1],products[0]]}];
-export default function CartPage(){const [quantity,setQuantity]=useState(1);const [removed,setRemoved]=useState(false);const product=products[1];const total=removed?0:product.price*quantity;return <div className="container"><FraudWarning/><h1 className="page-title">Giỏ hàng</h1><div className="two-column"><section>{removed?<div className="empty-state"><p>Giỏ hàng của bạn đang trống.</p><button className="pill-button" onClick={()=>setRemoved(false)}>Khôi phục sản phẩm mẫu</button></div>:<><article className="cart-item"><Link href={`/product/${product.id}`}><img src={product.image} alt={product.name}/></Link><div><strong>{product.name}</strong><p className="product-meta">Màu sắc: {product.color}<br/>Kích cỡ: Nam M</p><div className="price">{formatVnd(product.price)}</div><div className="quantity"><button aria-label="Giảm số lượng" onClick={()=>setQuantity(q=>Math.max(1,q-1))}>−</button><span>{quantity}</span><button aria-label="Tăng số lượng" onClick={()=>setQuantity(q=>q+1)}>+</button></div><p><button className="text-button small" onClick={()=>setRemoved(true)}>Xóa</button></p></div><div className="item-price"><strong>{formatVnd(total)}</strong></div></article><p className="small muted">Xóa　♡　Lưu vào danh sách yêu thích</p></>}</section><OrderSummary total={total}/></div>{shelves.map((s,i)=><section className="recommendation-section" key={s.title}><h2 className="section-title">{s.title}</h2><div className="product-grid">{s.items.map((p,j)=><ProductCard key={`${p.id}-${i}-${j}`} product={p}/>)}</div></section>)}<p style={{textAlign:"center",marginTop:36}}><Link className="pill-button" href="/wishlist">TIẾP TỤC MUA SẮM</Link></p></div>}
+
+import "./cart.css";
+
+export default function CartPage() {
+  const [quantity, setQuantity] = useState(1);
+  const product = products[1];
+  const total = product.price * quantity;
+
+  return (
+    <div className="container">
+      <FraudWarning />
+      <h1 className="page-title">Giỏ hàng</h1>
+      <div className="two-column">
+        <section>
+          <article className="cart-item">
+            <img src={product.image} alt={product.name} />
+            <div>
+              <strong>{product.name}</strong>
+              <p className="product-meta">Màu sắc: {product.color}</p>
+              <p className="product-meta">Kích cỡ: Nam M</p>
+              <div className="price">{formatVnd(product.price)}</div>
+              <div className="quantity">
+                <button aria-label="Giảm số lượng" onClick={() => setQuantity(q => Math.max(1, q - 1))}>−</button>
+                <span>{quantity}</span>
+                <button aria-label="Tăng số lượng" onClick={() => setQuantity(q => q + 1)}>+</button>
+              </div>
+              <p><button className="text-button" onClick={() => setQuantity(1)}>Xóa / đặt lại</button></p>
+            </div>
+            <div className="item-price"><strong>{formatVnd(total)}</strong></div>
+          </article>
+          <p className="small muted">Đủ điều kiện áp dụng miễn phí vận chuyển theo chính sách cửa hàng.</p>
+        </section>
+        <OrderSummary total={total} />
+      </div>
+      <section>
+        <h2 className="section-title">Có thể bạn sẽ thích</h2>
+        <div className="product-grid">{products.slice(0, 3).map(p => <ProductCard key={p.id} product={p} />)}</div>
+      </section>
+      <p style={{ textAlign: "center", marginTop: 32 }}>
+        <Link className="pill-button" href="/wishlist">Tiếp tục mua sắm</Link>
+      </p>
+    </div>
+  );
+}

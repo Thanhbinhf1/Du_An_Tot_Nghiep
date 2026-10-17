@@ -1,3 +1,54 @@
 "use client";
-import {useState} from "react";import Link from "next/link";import ProductCard from "@/components/product/ProductCard";import {formatVnd,products} from "@/data/products";
-export default function ProductDetailPage(){const product=products[2];const[size,setSize]=useState("M");const[color,setColor]=useState("OLIVE");const[added,setAdded]=useState(false);const[favorite,setFavorite]=useState(false);const[qty,setQty]=useState(1);const gallery=[product.image,"/images/polo-brown.jpg","/images/sweater-green.jpg","/images/jacket-sage.jpg","/images/shirt-cream.jpg",product.image];return <div className="container"><div className="breadcrumb"><Link href="/cart">UNIQLO</Link>　/　Nữ　/　Áo khoác　/　{product.name}</div><div className="product-detail"><div className="gallery">{gallery.map((src,i)=><img key={`${src}-${i}`} src={src} alt={`${product.name} - hình ${i+1}`}/>)}</div><section className="detail-info"><div className="product-meta">Mã sản phẩm: {product.code}</div><h1 className="page-title">{product.name}</h1><p className="detail-price">{formatVnd(product.price)}</p><div className="rating-line">★★★★★　<a href="#reviews">4.8 (1.203)　Đánh giá</a></div><p style={{fontSize:12}}>Màu sắc: <strong>{color}</strong></p><div className="option-row">{[{name:"OLIVE",color:"#66715a"},{name:"BLACK",color:"#222"},{name:"BEIGE",color:"#c9b99c"},{name:"GREEN",color:"#435d48"}].map(c=><button key={c.name} className="swatch" style={{background:c.color}} aria-label={c.name} title={c.name} onClick={()=>setColor(c.name)} />)}</div><div className="product-meta">Kích cỡ: <strong style={{color:"#111"}}>{size}</strong>　<a href="#size-guide" style={{color:"#0071ce",textDecoration:"underline"}}>Hướng dẫn chọn kích cỡ</a></div><div className="option-row">{["XS","S","M","L","XL","XXL"].map(s=><button key={s} className={`option ${size===s?"selected":""}`} onClick={()=>setSize(s)}>{s}</button>)}</div><p className="small muted">Số lượng</p><div className="quantity"><button onClick={()=>setQty(q=>Math.max(1,q-1))} aria-label="Giảm số lượng">−</button><span>{qty}</span><button onClick={()=>setQty(q=>q+1)} aria-label="Tăng số lượng">+</button></div><button className="pill-button dark detail-cta" onClick={()=>setAdded(true)}>THÊM VÀO GIỎ HÀNG</button><button className="pill-button detail-cta" onClick={()=>setFavorite(v=>!v)}>{favorite?"♥ ĐÃ THÊM VÀO YÊU THÍCH":"♡ THÊM VÀO YÊU THÍCH"}</button>{added&&<p role="status" className="small">Đã thêm {qty} sản phẩm · size {size}, màu {color}. <Link href="/cart"><u>Xem giỏ hàng</u></Link></p>}<div className="detail-accordion"><details open><summary>Mô tả sản phẩm</summary><p>Áo khoác chần bông nhẹ, kiểu dáng hiện đại, phù hợp mặc hằng ngày. Nội dung mô tả là dữ liệu minh họa cho đồ án.</p></details></div><div className="detail-accordion"><details><summary>Chất liệu và cách bảo quản</summary><p>Vui lòng tham khảo nhãn hướng dẫn bảo quản trên sản phẩm thực tế.</p></details></div><div className="detail-accordion"><details><summary>Giao hàng và đổi trả</summary><p>Thông tin giao hàng và đổi trả được minh họa, cần thay bằng chính sách chính thức của dự án.</p></details></div></section></div><section className="detail-sections"><h2 className="section-title">Chi tiết</h2><div className="feature-grid">{gallery.slice(0,4).map((src,i)=><div className="feature-card" key={src+i}><img src={src} alt="Chi tiết chất liệu"/><div><strong>{["Thiết kế tiện dụng","Chất liệu mềm mại","Đường may tỉ mỉ","Dễ phối đồ"][i]}</strong><p className="muted">Thiết kế tối giản, chú trọng sự thoải mái và tính ứng dụng hằng ngày.</p></div></div>)}</div></section><section className="detail-sections" id="reviews"><h2 className="section-title">Đánh giá</h2><p>★★★★★　4.8 trên 5　<span className="muted small">Dựa trên đánh giá mẫu</span></p>{[1,2,3].map((n)=><article className="review" key={n}><h4>{["Chất lượng tốt","Mặc thoải mái","Màu sắc đẹp"][n-1]}</h4><div className="review-stars">★★★★★</div><p>Sản phẩm đúng mô tả, kiểu dáng dễ mặc và phù hợp sử dụng hằng ngày.</p><div className="review-meta">Khách hàng đã mua hàng · Đánh giá mẫu</div></article>)}</section><section className="related-section"><h2 className="section-title">Sản phẩm tương tự</h2><div className="product-grid">{products.filter(p=>p.id!==product.id).map(p=><ProductCard key={p.id} product={p}/>)}</div></section><section className="related-section"><h2 className="section-title">Sản phẩm được quan tâm</h2><div className="product-grid">{products.map(p=><ProductCard key={p.id} product={p}/>)}</div></section><section className="related-section"><h2 className="section-title">Đã xem gần đây</h2><div className="product-grid">{products.slice(1,2).map(p=><ProductCard key={p.id} product={p}/>)}</div></section></div>}
+
+import { useState } from "react";
+import Link from "next/link";
+import ProductCard from "@/components/product/ProductCard";
+import { formatVnd, products } from "@/data/products";
+
+import "./product.css";
+
+export default function ProductDetailPage() {
+  const product = products[0];
+  const [size, setSize] = useState("M");
+  const [added, setAdded] = useState(false);
+  const [favorite, setFavorite] = useState(false);
+
+  return (
+    <div className="container">
+      <div className="breadcrumb"><Link href="/cart">Trang chủ</Link> / Nam / {product.category}</div>
+      <div className="product-detail" style={{ marginTop: 20 }}>
+        <div className="gallery">
+          <img src={product.image} alt={product.name} />
+          <img src={products[2].image} alt="Ảnh chi tiết sản phẩm" />
+          <img src={products[3].image} alt="Ảnh chất liệu sản phẩm" />
+          <img src={product.image} alt="Ảnh sản phẩm từ phía sau" />
+        </div>
+        <section>
+          <p className="product-meta">{product.code}</p>
+          <h1 className="page-title" style={{ marginTop: 8 }}>{product.name}</h1>
+          <div className="detail-price">{formatVnd(product.price)}</div>
+          <p>★ {product.rating} · Đánh giá của khách hàng</p>
+          <p>Màu sắc: <strong>{product.color}</strong></p>
+          <div className="option-row">
+            {["55 GREEN", "09 BLACK", "00 WHITE"].map(color => <button key={color} className={`option ${product.color === color ? "selected" : ""}`}>{color}</button>)}
+          </div>
+          <p>Kích cỡ: <strong>{size}</strong></p>
+          <div className="option-row">
+            {product.sizes.map(s => <button key={s} className={`option ${size === s ? "selected" : ""}`} onClick={() => setSize(s)}>{s}</button>)}
+          </div>
+          <button className="pill-button dark" style={{ width: "100%" }} onClick={() => setAdded(true)}>Thêm vào giỏ hàng</button>
+          <button className="pill-button" style={{ width: "100%", marginTop: 10 }} onClick={() => setFavorite(v => !v)}>{favorite ? "♥ Đã thêm vào yêu thích" : "♡ Thêm vào yêu thích"}</button>
+          {added && <p role="status">Đã thêm vào giỏ hàng demo · Size {size}. <Link href="/cart"><u>Xem giỏ hàng</u></Link></p>}
+          <hr style={{ border: 0, borderTop: "1px solid #ddd", margin: "24px 0" }} />
+          <details open><summary>Mô tả sản phẩm</summary><p className="muted">Thông tin mô tả minh họa. Thay bằng nội dung sản phẩm chính thức của nhóm.</p></details>
+          <details><summary>Chất liệu và cách bảo quản</summary><p className="muted">Bổ sung thông tin từ dữ liệu sản phẩm.</p></details>
+          <details><summary>Giao hàng và đổi trả</summary><p className="muted">Bổ sung chính sách cửa hàng.</p></details>
+        </section>
+      </div>
+      <section>
+        <h2 className="section-title">Sản phẩm bạn có thể quan tâm</h2>
+        <div className="product-grid">{products.slice(1).map(p => <ProductCard key={p.id} product={p} />)}</div>
+      </section>
+    </div>
+  );
+}
