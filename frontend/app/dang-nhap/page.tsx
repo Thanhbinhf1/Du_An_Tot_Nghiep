@@ -1,31 +1,54 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { DEMO_CREDENTIALS, signInDemo } from "@/lib/demo-auth";
 import styles from "../auth.module.css";
 
 export default function DangNhapPage() {
+  const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
+  const [account, setAccount] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+
+  function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (
+      account.trim().toLowerCase() !== DEMO_CREDENTIALS.account ||
+      password !== DEMO_CREDENTIALS.password
+    ) {
+      setLoginError("Thông tin đăng nhập chưa chính xác. Hãy dùng tài khoản demo bên dưới.");
+      return;
+    }
+    setLoginError("");
+    signInDemo(DEMO_CREDENTIALS.account, remember);
+    router.push("/profile");
+  }
 
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
         <section className={styles.formPanel}>
-          <img
+          <Image
             className={styles.logo}
             src="/logo-vcs.png"
             alt="VCS BAPD"
+            width={76}
+            height={76}
           />
 
           <div className={styles.form}>
             <h1 className={styles.title}>Chào mừng bạn đến với BAPD</h1>
             <p className={styles.subtitle}>
-              Vui lòng nhập thông tin của bạn
+              Đăng nhập bằng tài khoản demo để tiếp tục
             </p>
 
-            <form onSubmit={(event) => event.preventDefault()}>
+            <form onSubmit={handleLogin}>
               <label className={styles.field}>
                 <span className={styles.label}>Tài khoản</span>
                 <span className={styles.inputWrap}>
@@ -35,6 +58,8 @@ export default function DangNhapPage() {
                     name="account"
                     placeholder="Nhập email hoặc số điện thoại"
                     autoComplete="username"
+                    value={account}
+                    onChange={(event) => setAccount(event.target.value)}
                     required
                   />
                 </span>
@@ -49,6 +74,8 @@ export default function DangNhapPage() {
                     name="password"
                     placeholder="Nhập mật khẩu"
                     autoComplete="current-password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
                     required
                   />
                   <button
@@ -80,6 +107,7 @@ export default function DangNhapPage() {
               <button className={styles.submit} type="submit">
                 Đăng nhập
               </button>
+              {loginError && <p className={styles.loginError} role="alert">{loginError}</p>}
             </form>
 
             <div className={styles.divider}>Hoặc đăng nhập bằng</div>
@@ -94,17 +122,19 @@ export default function DangNhapPage() {
             </button>
 
             <p className={styles.switch}>
-              Bạn chưa có tài khoản?{" "}
+              Chưa có tài khoản thật? Đăng ký sẽ hoạt động khi kết nối backend.{" "}
               <Link href="/dang-ky">Đăng ký ngay</Link>
             </p>
           </div>
         </section>
 
         <aside className={styles.imagePanel}>
-          <img
+          <Image
             className={styles.coverImage}
             src="/images/auth/auth-fashion.png"
             alt="Giá treo quần áo với tông màu be trong không gian thời trang"
+            fill
+            sizes="(max-width: 760px) 0px, 50vw"
           />
           <div className={styles.imageCaption}>
             <strong>Phong cách của riêng bạn</strong>

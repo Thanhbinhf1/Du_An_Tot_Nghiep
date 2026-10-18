@@ -1,15 +1,29 @@
+import Link from "next/link";
 import { formatVnd } from "@/data/products";
 
-export default function OrderSummary({ total, checkout = false }: { total: number; checkout?: boolean }) {
+export default function OrderSummary({
+  total,
+  checkout = false,
+  itemCount = 1,
+}: {
+  total: number;
+  checkout?: boolean;
+  itemCount?: number;
+}) {
   return (
     <aside className="summary-column">
       <div className="panel">
-        <div className="summary-row"><strong>Tổng đơn hàng</strong><strong>1 Sản phẩm</strong></div>
+        <div className="summary-row"><strong>Tổng đơn hàng</strong><strong>{itemCount} sản phẩm</strong></div>
         <div className="summary-row"><span>Tạm tính</span><span>{formatVnd(total)}</span></div>
         <div className="summary-row"><span>Phí vận chuyển</span><span className="small">Sẽ được quyết định sau</span></div>
         <div className="summary-row total"><span>Tổng đơn đặt hàng</span><span>{formatVnd(total)}</span></div>
         <div className="summary-row small"><span>Đã bao gồm thuế giá trị gia tăng</span><span>{formatVnd(Math.round(total * 0.08))}</span></div>
       </div>
+      {checkout ? null : (
+        <Link className="pill-button dark cart-checkout-button" href="/checkout">
+          Tiến hành thanh toán
+        </Link>
+      )}
       <details style={{ borderBottom: "1px solid #ddd", padding: "14px 0" }}>
         <summary>▧ Áp dụng mã giảm giá</summary>
         <label className="form-field">
