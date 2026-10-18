@@ -8,9 +8,15 @@ import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import connectDB from "./config/db.js";
+
+import "./models/categoryModel.js";
+import "./models/brandModel.js";
+
+import productRoutes from "./routes/productRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import catalogRoutes from "./routes/catalogRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+
 import { notFound, errorHandler } from "./middlewares/errorMiddleware.js";
 
 const app: Application = express();
@@ -20,7 +26,10 @@ const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use("/uploads", express.static(path.resolve(currentDirectory, "../uploads")));
+app.use(
+  "/uploads",
+  express.static(path.resolve(currentDirectory, "../uploads")),
+);
 
 // Health check route
 app.get("/", (_req: Request, res: Response) => {
@@ -30,12 +39,13 @@ app.get("/", (_req: Request, res: Response) => {
   });
 });
 
-// Routes Nghiệp vụ
+// Routes nghiệp vụ
 app.use("/api/auth", authRoutes);
 app.use("/api/catalog", catalogRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/products", productRoutes);
 
-// Error Handling Middlewares (Phải nằm cuối)
+// Error handling middlewares (phải nằm cuối)
 app.use(notFound);
 app.use(errorHandler);
 
@@ -45,11 +55,11 @@ const PORT = Number(process.env.PORT) || 5000;
 const startServer = async (): Promise<void> => {
   await connectDB();
   app.listen(PORT, () => {
-    console.log(`🌟 Server đang chạy tại http://localhost:${PORT}`);
+    console.log(`Server đang chạy tại http://localhost:${PORT}`);
   });
 };
 
 startServer().catch((error: unknown) => {
-  console.error("❌ Không thể khởi động server:", error);
-  process.exit(1);
+  console.error("Không thể khởi động server:", error);
+  process.exitCode = 1;
 });
