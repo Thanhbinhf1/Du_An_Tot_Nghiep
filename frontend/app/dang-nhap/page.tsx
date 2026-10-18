@@ -5,7 +5,8 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { DEMO_CREDENTIALS, signInDemo } from "@/lib/demo-auth";
+import { signIn } from "@/lib/demo-auth";
+import { API_BASE_URL, readApiResponse } from "@/lib/api";
 import styles from "../auth.module.css";
 
 export default function DangNhapPage() {
@@ -15,19 +16,30 @@ export default function DangNhapPage() {
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  function handleLogin(event: FormEvent<HTMLFormElement>) {
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (
-      account.trim().toLowerCase() !== DEMO_CREDENTIALS.account ||
-      password !== DEMO_CREDENTIALS.password
-    ) {
-      setLoginError("Thông tin đăng nhập chưa chính xác. Hãy dùng tài khoản demo bên dưới.");
-      return;
-    }
+    setSubmitting(true);
     setLoginError("");
-    signInDemo(DEMO_CREDENTIALS.account, remember);
-    router.push("/profile");
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: account, password }),
+      });
+      const user = await readApiResponse<{
+        email: string;
+        role: "customer" | "staff" | "admin";
+        token: string;
+      }>(response);
+      signIn(user.email, user.role, user.token, remember);
+      router.push(user.role === "admin" ? "/admin" : "/profile");
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "Không thể đăng nhập.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -45,7 +57,7 @@ export default function DangNhapPage() {
           <div className={styles.form}>
             <h1 className={styles.title}>Chào mừng bạn đến với BAPD</h1>
             <p className={styles.subtitle}>
-              Đăng nhập bằng tài khoản demo để tiếp tục
+              Đăng nhập bằng tài khoản của bạn để tiếp tục
             </p>
 
             <form onSubmit={handleLogin}>
@@ -54,9 +66,9 @@ export default function DangNhapPage() {
                 <span className={styles.inputWrap}>
                   <input
                     className={styles.input}
-                    type="text"
+                    type="email"
                     name="account"
-                    placeholder="Nhập email hoặc số điện thoại"
+                    placeholder="Nhập email"
                     autoComplete="username"
                     value={account}
                     onChange={(event) => setAccount(event.target.value)}
@@ -104,8 +116,8 @@ export default function DangNhapPage() {
                 </a>
               </div>
 
-              <button className={styles.submit} type="submit">
-                Đăng nhập
+              <button className={styles.submit} type="submit" disabled={submitting}>
+                {submitting ? "Đang đăng nhập..." : "Đăng nhập"}
               </button>
               {loginError && <p className={styles.loginError} role="alert">{loginError}</p>}
             </form>
@@ -122,7 +134,7 @@ export default function DangNhapPage() {
             </button>
 
             <p className={styles.switch}>
-              Chưa có tài khoản thật? Đăng ký sẽ hoạt động khi kết nối backend.{" "}
+              Chưa có tài khoản?{" "}
               <Link href="/dang-ky">Đăng ký ngay</Link>
             </p>
           </div>

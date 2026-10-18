@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import ProductCard from "@/components/product/ProductCard";
-import { products } from "@/data/products";
+import { useCatalogProducts } from "@/lib/useCatalogProducts";
 import { useWishlistIds } from "@/lib/storefront-demo";
 
 export default function WishlistPage() {
   const ids = useWishlistIds();
+  const { products } = useCatalogProducts();
   const savedProducts = products.filter((product) => ids.includes(product.id));
 
   return (

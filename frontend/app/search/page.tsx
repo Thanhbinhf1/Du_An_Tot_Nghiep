@@ -6,5 +6,6 @@ export default async function SearchPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const params = await searchParams;
-  return <ProductListing initialQuery={params.q ?? ""} searchMode />;
+  const query = params.q ?? "";
+  return <ProductListing key={query} initialQuery={query} searchMode />;
 }

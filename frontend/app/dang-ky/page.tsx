@@ -1,14 +1,54 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { API_BASE_URL, readApiResponse } from "@/lib/api";
+import { signIn } from "@/lib/demo-auth";
 import styles from "../auth.module.css";
 
 export default function DangKyPage() {
+  const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleRegister(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSubmitting(true);
+    const form = new FormData(event.currentTarget);
+    if (form.get("password") !== form.get("confirmPassword")) {
+      setError("Mật khẩu xác nhận chưa khớp.");
+      setSubmitting(false);
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.get("fullName"),
+          email: form.get("emailOrPhone"),
+          password: form.get("password"),
+        }),
+      });
+      const user = await readApiResponse<{
+        email: string;
+        role: "customer" | "staff" | "admin";
+        token: string;
+      }>(response);
+      signIn(user.email, user.role, user.token, true);
+      router.push("/profile");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Không thể tạo tài khoản.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <main className={styles.page}>
@@ -30,7 +70,7 @@ export default function DangKyPage() {
               Bắt đầu hành trình thời trang của bạn cùng BAPD.
             </p>
 
-            <form onSubmit={(event) => event.preventDefault()}>
+            <form onSubmit={handleRegister}>
               <label className={styles.field}>
                 <span className={styles.label}>Họ và tên</span>
                 <span className={styles.inputWrap}>
@@ -47,12 +87,12 @@ export default function DangKyPage() {
 
               <label className={styles.field}>
                 <span className={styles.label}>
-                  Email hoặc số điện thoại
+                  Email
                 </span>
                 <span className={styles.inputWrap}>
                   <input
                     className={styles.input}
-                    type="text"
+                    type="email"
                     name="emailOrPhone"
                     placeholder="Nhập email hoặc số điện thoại"
                     autoComplete="email"
@@ -136,8 +176,9 @@ export default function DangKyPage() {
               </div>
 
               <button className={styles.submit} type="submit">
-                Đăng ký
+                {submitting ? "Đang tạo tài khoản..." : "Đăng ký"}
               </button>
+              {error && <p className={styles.loginError} role="alert">{error}</p>}
             </form>
 
             <div className={styles.divider}>Hoặc đăng ký bằng</div>

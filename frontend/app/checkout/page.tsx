@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import FraudWarning from "@/components/layout/FraudWarning";
 import OrderSummary from "@/components/cart/OrderSummary";
-import { formatVnd, products } from "@/data/products";
+import { formatVnd } from "@/data/products";
 import { createDemoOrder, saveDemoAddress, useCartItems, useDemoAddress } from "@/lib/storefront-demo";
+import { useCatalogProducts } from "@/lib/useCatalogProducts";
 
 import "./checkout.css";
 
@@ -22,6 +23,7 @@ function CheckoutContent({
 }) {
   const router = useRouter();
   const cartItems = useCartItems();
+  const { products } = useCatalogProducts();
   const [delivery, setDelivery] = useState<"address" | "pickup">("address");
   const [name, setName] = useState(initialAddress.name ?? "");
   const [phone, setPhone] = useState(initialAddress.phone ?? "");

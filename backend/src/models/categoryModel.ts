@@ -8,6 +8,7 @@ export interface ICategory extends Document {
   name: string;
   slug: string;
   image?: string;
+  description: string;
   status: boolean;
   created_at: Date;
   updated_at: Date;
@@ -39,6 +40,7 @@ const categorySchema = new Schema<ICategory>(
       type: String,
       default: "", // Không bắt buộc có ảnh
     },
+    description: { type: String, default: "", trim: true },
     status: {
       type: Boolean,
       default: true, // Mặc định tạo ra là hiển thị

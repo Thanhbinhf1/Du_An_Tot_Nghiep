@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { formatVnd, products } from "@/data/products";
+import { formatVnd } from "@/data/products";
 import { useDemoOrders } from "@/lib/storefront-demo";
 import type { DemoOrder } from "@/lib/storefront-demo";
+import { useCatalogProducts } from "@/lib/useCatalogProducts";
 
-function OrderCard({ order }: { order: DemoOrder }) {
+function OrderCard({ order, products }: { order: DemoOrder; products: ReturnType<typeof useCatalogProducts>["products"] }) {
   return (
     <article className="order-card">
       <div className="order-card-heading"><div><strong>{order.id}</strong><span>Đặt ngày {new Date(order.createdAt).toLocaleDateString("vi-VN")}</span></div><span className="order-status">{order.status}</span></div>
@@ -21,12 +22,13 @@ function OrderCard({ order }: { order: DemoOrder }) {
 
 export function OrderHistory() {
   const orders = useDemoOrders();
+  const { products } = useCatalogProducts();
   return (
     <section className="orders-page">
       <div className="breadcrumb"><Link href="/">Trang chủ</Link> / Tài khoản / Đơn hàng</div>
       <h1>Đơn hàng của tôi</h1>
       <p className="muted">Xem lại đơn hàng và cập nhật trạng thái giao hàng demo.</p>
-      {orders.length ? <div className="order-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div> : (
+      {orders.length ? <div className="order-list">{orders.map((order) => <OrderCard key={order.id} order={order} products={products} />)}</div> : (
         <div className="empty-state"><h2>Bạn chưa có đơn hàng</h2><p>Đơn hàng sẽ xuất hiện tại đây sau khi bạn hoàn tất checkout.</p><Link className="pill-button dark" href="/products">Mua sắm ngay</Link></div>
       )}
     </section>
@@ -35,6 +37,7 @@ export function OrderHistory() {
 
 export function OrderDetails({ orderId }: { orderId: string }) {
   const orders = useDemoOrders();
+  const { products } = useCatalogProducts();
   const order = orders.find((item) => item.id === orderId);
   if (!order) return <div className="empty-state order-not-found"><h1>Không tìm thấy đơn hàng</h1><p>Đơn hàng có thể không tồn tại trong trình duyệt này.</p><Link className="pill-button" href="/orders">Về đơn hàng</Link></div>;
   return (

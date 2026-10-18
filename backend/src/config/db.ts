@@ -2,8 +2,11 @@ import mongoose from "mongoose";
 
 const connectDB = async () => {
   try {
-    // Ép kiểu (as string) để TypeScript hiểu biến môi trường này luôn tồn tại
-    const conn = await mongoose.connect(process.env.DATABASE as string);
+    const databaseUrl = process.env.DATABASE ?? process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error("Thiếu cấu hình DATABASE hoặc DATABASE_URL");
+    }
+    const conn = await mongoose.connect(databaseUrl);
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
     console.error(`Lỗi kết nối MongoDB: ${(error as Error).message}`);

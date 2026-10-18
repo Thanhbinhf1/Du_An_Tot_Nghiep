@@ -30,7 +30,7 @@ export default function ProductCard({ product }: { product: Product }) {
         <p className="product-name">{product.name}</p>
       </Link>
       <div className="price">{formatVnd(product.price)}</div>
-      <div className="product-meta">★ {product.rating} · Unisex</div>
+      <div className="product-meta">★ {product.rating} · {product.category}</div>
     </article>
   );
 }

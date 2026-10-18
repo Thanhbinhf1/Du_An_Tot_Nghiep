@@ -19,6 +19,9 @@ export class AuthService {
   }
 
   static async registerUser(data: IRegisterData) {
+    if (!data || typeof data !== "object") {
+      throw new AppError("Thông tin đăng ký không hợp lệ.", 400);
+    }
     const { name, email, password, phone } = data;
 
     if (!name || !email || !password) {
@@ -26,6 +29,15 @@ export class AuthService {
         "Vui lòng cung cấp đầy đủ Tên, Email và Mật khẩu",
         400,
       );
+    }
+    if (typeof name !== "string" || typeof email !== "string" || typeof password !== "string") {
+      throw new AppError("Thông tin đăng ký không hợp lệ.", 400);
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      throw new AppError("Vui lòng nhập địa chỉ email hợp lệ.", 400);
+    }
+    if (password.length < 8) {
+      throw new AppError("Mật khẩu phải có ít nhất 8 ký tự.", 400);
     }
 
     const emailFormatted = email.trim().toLowerCase();
@@ -50,8 +62,8 @@ export class AuthService {
         role: user.role,
         token: this.generateToken(user._id.toString(), user.role),
       };
-    } catch (error: any) {
-      if (error.code === 11000) {
+    } catch (error: unknown) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === 11000) {
         throw new AppError("Email này đã được sử dụng!", 409);
       }
       throw error;

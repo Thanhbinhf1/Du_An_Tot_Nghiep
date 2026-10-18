@@ -1,21 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import ProductCard from "@/components/product/ProductCard";
-import { formatVnd, products } from "@/data/products";
+import { formatVnd, products as sampleProducts } from "@/data/products";
 import { addCartItem, toggleWishlist, useWishlistIds } from "@/lib/storefront-demo";
+import { API_BASE_URL, mapApiProduct, readApiResponse, type ApiProduct } from "@/lib/api";
+import { useCatalogProducts } from "@/lib/useCatalogProducts";
+import type { Product } from "@/types/product";
 
 import "./product.css";
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const product = products.find((item) => item.id === id) ?? products[0];
-  const [size, setSize] = useState(product.sizes[0] ?? "M");
-  const [color, setColor] = useState(product.color);
+  const localProduct = sampleProducts.find((item) => item.id === id);
+  const [apiProduct, setApiProduct] = useState<Product | null>(null);
+  const [productError, setProductError] = useState("");
+  const [size, setSize] = useState(localProduct?.sizes[0] ?? "");
+  const [color, setColor] = useState(localProduct?.color ?? "");
   const [added, setAdded] = useState(false);
-  const favorite = useWishlistIds().includes(product.id);
+  const wishlistIds = useWishlistIds();
+  const { products } = useCatalogProducts();
+  const product = apiProduct ?? localProduct;
+
+  useEffect(() => {
+    if (localProduct) return;
+    let active = true;
+    fetch(`${API_BASE_URL}/catalog/products/${id}`)
+      .then(readApiResponse<ApiProduct>)
+      .then((result) => {
+        if (!active) return;
+        const loadedProduct = mapApiProduct(result);
+        setApiProduct(loadedProduct);
+        setSize(loadedProduct.sizes[0] ?? "M");
+        setColor(loadedProduct.color);
+      })
+      .catch((error: unknown) => {
+        if (active) setProductError(error instanceof Error ? error.message : "Không thể tải sản phẩm.");
+      });
+    return () => { active = false; };
+  }, [id, localProduct]);
+
+  if (!product) {
+    return <div className="empty-state">{productError || "Đang tải sản phẩm..."}</div>;
+  }
+  const favorite = wishlistIds.includes(product.id);
 
   return (
     <div className="container">
@@ -51,7 +81,7 @@ export default function ProductDetailPage() {
       </div>
       <section>
         <h2 className="section-title">Sản phẩm bạn có thể quan tâm</h2>
-        <div className="product-grid">{products.slice(1).map(p => <ProductCard key={p.id} product={p} />)}</div>
+        <div className="product-grid">{products.filter((item) => item.id !== product.id).slice(0, 6).map(p => <ProductCard key={p.id} product={p} />)}</div>
       </section>
     </div>
   );

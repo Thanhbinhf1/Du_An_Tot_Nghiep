@@ -6,5 +6,7 @@ export default async function ProductsPage({
   searchParams: Promise<{ category?: string; q?: string }>;
 }) {
   const params = await searchParams;
-  return <ProductListing initialCategory={params.category ?? ""} initialQuery={params.q ?? ""} />;
+  const category = params.category ?? "";
+  const query = params.q ?? "";
+  return <ProductListing key={`${category}:${query}`} initialCategory={category} initialQuery={query} />;
 }

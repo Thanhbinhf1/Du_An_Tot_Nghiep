@@ -6,6 +6,9 @@ import { AppError } from "../middlewares/AppError.js";
 export class AuthController {
   static async register(req: Request, res: Response, next: NextFunction) {
     try {
+      if (!req.body || typeof req.body !== "object") {
+        throw new AppError("Thông tin đăng ký không hợp lệ.", 400);
+      }
       const result = await AuthService.registerUser(req.body);
       res.status(201).json({
         status: "success",
@@ -20,7 +23,7 @@ export class AuthController {
   static async login(req: Request, res: Response, next: NextFunction) {
     try {
       const { email, password } = req.body;
-      if (!email || !password) {
+      if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
         throw new AppError("Vui lòng cung cấp đầy đủ email và mật khẩu", 400);
       }
       const result = await AuthService.loginUser(email, password);

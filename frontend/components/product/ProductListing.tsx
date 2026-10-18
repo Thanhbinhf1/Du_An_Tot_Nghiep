@@ -1,14 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import ProductCard from "@/components/product/ProductCard";
-import { products } from "@/data/products";
-
-const categories = [
-  "Áo khoác", "Áo thun", "Áo sơ mi", "Quần dài", "Đồ mặc nhà", "Phụ kiện",
-  "Trang phục nữ", "Trang phục nam", "Trẻ em", "LifeWear", "UT graphic", "Bộ sưu tập",
-];
+import { productCategories } from "@/data/categories";
+import { API_BASE_URL, readApiResponse, type ApiCategory } from "@/lib/api";
+import { useCatalogProducts } from "@/lib/useCatalogProducts";
 
 export default function ProductListing({
   initialCategory = "",
@@ -23,10 +20,24 @@ export default function ProductListing({
   const [query, setQuery] = useState(initialQuery);
   const [sort, setSort] = useState("featured");
   const [maxPrice, setMaxPrice] = useState(2_000_000);
+  const { products: catalogProducts, error: catalogError } = useCatalogProducts();
+  const [catalogCategories, setCatalogCategories] = useState<Array<Pick<ApiCategory, "name" | "slug">>>(productCategories.map((item) => ({ name: item.name, slug: item.slug })));
+  const [categoryLoadError, setCategoryLoadError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${API_BASE_URL}/catalog/categories`).then(readApiResponse<ApiCategory[]>).then((apiCategories) => {
+      if (!active) return;
+      setCatalogCategories(apiCategories);
+    }).catch((error: unknown) => {
+      if (active) setCategoryLoadError(error instanceof Error ? error.message : "Không thể tải danh mục.");
+    });
+    return () => { active = false; };
+  }, []);
 
   const visibleProducts = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("vi");
-    const filtered = products.filter((product) => {
+    const filtered = catalogProducts.filter((product) => {
       const matchesQuery =
         !normalizedQuery ||
         `${product.name} ${product.category} ${product.color} ${product.code}`
@@ -35,11 +46,7 @@ export default function ProductListing({
       const matchesCategory =
         !category ||
         category === "Tất cả" ||
-        category === "Bộ sưu tập" ||
-        category === "LifeWear" ||
-        category === "UT graphic" ||
-        product.category.toLocaleLowerCase("vi").includes(category.toLocaleLowerCase("vi")) ||
-        category.toLocaleLowerCase("vi").includes(product.category.toLocaleLowerCase("vi"));
+        product.category.toLocaleLowerCase("vi") === category.toLocaleLowerCase("vi");
       return matchesQuery && matchesCategory && product.price <= maxPrice;
     });
 
@@ -47,7 +54,7 @@ export default function ProductListing({
     if (sort === "price-desc") filtered.sort((a, b) => b.price - a.price);
     if (sort === "rating") filtered.sort((a, b) => b.rating - a.rating);
     return filtered;
-  }, [category, maxPrice, query, sort]);
+  }, [catalogProducts, category, maxPrice, query, sort]);
 
   return (
     <section className="catalog-page">
@@ -69,7 +76,7 @@ export default function ProductListing({
           Danh mục
           <select value={category} onChange={(event) => setCategory(event.target.value)}>
             <option value="">Tất cả sản phẩm</option>
-            {categories.map((item) => <option key={item} value={item}>{item}</option>)}
+            {catalogCategories.map((item) => <option key={item.slug} value={item.name}>{item.name}</option>)}
           </select>
         </label>
         <label>
@@ -87,6 +94,7 @@ export default function ProductListing({
         </label>
       </div>
 
+      {(catalogError || categoryLoadError) && <p className="catalog-result-count" role="status">Đang hiển thị dữ liệu mẫu. {catalogError || categoryLoadError}</p>}
       <p className="catalog-result-count">Tìm thấy {visibleProducts.length} sản phẩm</p>
       {visibleProducts.length ? (
         <div className="product-grid">

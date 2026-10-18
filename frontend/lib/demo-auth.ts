@@ -2,12 +2,8 @@
 
 import { useSyncExternalStore } from "react";
 
-export const DEMO_CREDENTIALS = {
-  account: "demo@vcsbapd.vn",
-  password: "Bapd@123456",
-} as const;
-
-const serverSnapshot = JSON.stringify([false, ""]);
+const serverSnapshot = JSON.stringify([false, "", "customer", ""]);
+export type AccountRole = "customer" | "staff" | "admin";
 
 function getSnapshot() {
   if (typeof window === "undefined") return serverSnapshot;
@@ -18,6 +14,8 @@ function getSnapshot() {
   return JSON.stringify([
     storage.getItem("bapd-demo-authenticated") === "true",
     storage.getItem("bapd-demo-account") ?? "",
+    storage.getItem("bapd-demo-role") ?? "customer",
+    storage.getItem("bapd-demo-token") ?? "",
   ]);
 }
 
@@ -32,25 +30,45 @@ function subscribe(callback: () => void) {
 
 export function useDemoAuth() {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, () => serverSnapshot);
-  const [isLoggedIn, account] = JSON.parse(snapshot) as [boolean, string];
-  return { isLoggedIn, account };
+  const [isLoggedIn, account, role, token] = JSON.parse(snapshot) as [
+    boolean,
+    string,
+    AccountRole,
+    string,
+  ];
+  const isHydrated = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+  return { isLoggedIn, account, role, token, isHydrated };
 }
 
-export function signInDemo(account: string, remember: boolean) {
+export function signIn(account: string, role: AccountRole, token: string, remember: boolean) {
   localStorage.removeItem("bapd-demo-authenticated");
   localStorage.removeItem("bapd-demo-account");
+  localStorage.removeItem("bapd-demo-role");
+  localStorage.removeItem("bapd-demo-token");
   sessionStorage.removeItem("bapd-demo-authenticated");
   sessionStorage.removeItem("bapd-demo-account");
+  sessionStorage.removeItem("bapd-demo-role");
+  sessionStorage.removeItem("bapd-demo-token");
   const storage = remember ? localStorage : sessionStorage;
   storage.setItem("bapd-demo-authenticated", "true");
   storage.setItem("bapd-demo-account", account.trim());
+  storage.setItem("bapd-demo-role", role);
+  storage.setItem("bapd-demo-token", token);
   window.dispatchEvent(new Event("bapd-demo-auth-change"));
 }
 
 export function signOutDemo() {
   localStorage.removeItem("bapd-demo-authenticated");
   localStorage.removeItem("bapd-demo-account");
+  localStorage.removeItem("bapd-demo-role");
+  localStorage.removeItem("bapd-demo-token");
   sessionStorage.removeItem("bapd-demo-authenticated");
   sessionStorage.removeItem("bapd-demo-account");
+  sessionStorage.removeItem("bapd-demo-role");
+  sessionStorage.removeItem("bapd-demo-token");
   window.dispatchEvent(new Event("bapd-demo-auth-change"));
 }

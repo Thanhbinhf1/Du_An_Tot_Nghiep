@@ -5,16 +5,22 @@ import express, {
   type Response,
 } from "express";
 import cors from "cors";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
+import catalogRoutes from "./routes/catalogRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
 import { notFound, errorHandler } from "./middlewares/errorMiddleware.js";
 
 const app: Application = express();
+const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 // Middlewares
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use("/uploads", express.static(path.resolve(currentDirectory, "../uploads")));
 
 // Health check route
 app.get("/", (_req: Request, res: Response) => {
@@ -26,6 +32,8 @@ app.get("/", (_req: Request, res: Response) => {
 
 // Routes Nghiệp vụ
 app.use("/api/auth", authRoutes);
+app.use("/api/catalog", catalogRoutes);
+app.use("/api/admin", adminRoutes);
 
 // Error Handling Middlewares (Phải nằm cuối)
 app.use(notFound);

@@ -4,13 +4,15 @@ import Link from "next/link";
 import FraudWarning from "@/components/layout/FraudWarning";
 import OrderSummary from "@/components/cart/OrderSummary";
 import ProductCard from "@/components/product/ProductCard";
-import { formatVnd, products } from "@/data/products";
+import { formatVnd } from "@/data/products";
 import { saveCartItems, useCartItems } from "@/lib/storefront-demo";
+import { useCatalogProducts } from "@/lib/useCatalogProducts";
 
 import "./cart.css";
 
 export default function CartPage() {
   const cartItems = useCartItems();
+  const { products } = useCatalogProducts();
   const total = cartItems.reduce((sum, item) => {
     const product = products.find((candidate) => candidate.id === item.productId);
     return sum + (product?.price ?? 0) * item.quantity;

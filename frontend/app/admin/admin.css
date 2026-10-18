@@ -1,0 +1,32 @@
+.admin-page { margin: 26px 0 60px; }
+.admin-heading, .admin-toolbar, .admin-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.admin-heading { border-bottom: 1px solid #ddd; margin-bottom: 24px; padding-bottom: 18px; }
+.admin-heading h1 { margin: 0 0 5px; font-size: 28px; font-weight: 500; }
+.admin-heading p, .admin-muted { color: #707070; margin: 0; }
+.admin-heading button, .admin-button { border: 1px solid #111; background: #111; color: white; padding: 10px 16px; }
+.admin-tabs { display: flex; gap: 8px; margin: 18px 0; }
+.admin-tabs button { border: 1px solid #ccc; padding: 10px 16px; background: white; }
+.admin-tabs button.active { background: #111; border-color: #111; color: white; }
+.admin-panel { border: 1px solid #ddd; padding: 22px; margin: 18px 0; }
+.admin-panel h2 { font-size: 19px; font-weight: 500; margin: 0 0 18px; }
+.admin-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.admin-form label { display: grid; gap: 6px; font-size: 12px; }
+.admin-form input, .admin-form select, .admin-form textarea { width: 100%; border: 1px solid #bbb; padding: 10px; background: white; }
+.admin-form textarea { min-height: 82px; resize: vertical; }
+.admin-form .wide { grid-column: 1 / -1; }
+.admin-actions { display: flex; gap: 8px; }
+.admin-actions button { border: 1px solid #bbb; padding: 8px 12px; background: #fff; }
+.admin-actions .danger { color: #b00020; }
+.admin-table { width: 100%; border-collapse: collapse; }
+.admin-table th, .admin-table td { border-bottom: 1px solid #eee; padding: 12px 8px; text-align: left; vertical-align: middle; }
+.admin-table th { color: #666; font-size: 11px; font-weight: 500; }
+.admin-table img { width: 54px; height: 68px; object-fit: cover; }
+.admin-alert { margin: 14px 0; padding: 12px; background: #fff2f2; color: #a00000; }
+.admin-success { margin: 14px 0; color: #267844; }
+.admin-login-prompt { max-width: 540px; margin: 50px auto; border: 1px solid #ddd; padding: 30px; text-align: center; }
+@media (max-width: 700px) {
+  .admin-heading, .admin-row { align-items: flex-start; flex-direction: column; }
+  .admin-form { grid-template-columns: 1fr; }
+  .admin-form .wide { grid-column: auto; }
+  .admin-table { display: block; overflow-x: auto; white-space: nowrap; }
+}
