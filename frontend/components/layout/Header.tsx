@@ -7,8 +7,34 @@ import { useDemoAuth } from "@/lib/demo-auth";
 import { productCategories } from "@/data/categories";
 import { API_BASE_URL, readApiResponse, type ApiCategory } from "@/lib/api";
 
+const categoryOrder = ["nam", "nu", "tre-em", "em-be"];
+const orderCategories = (items: Array<Pick<ApiCategory, "name" | "slug">>) =>
+  [...items].sort((first, second) =>
+    categoryOrder.indexOf(first.slug) - categoryOrder.indexOf(second.slug),
+  );
+
+const categoryMenus: Record<string, Array<{ title: string; items: string[] }>> = {
+  nam: [
+    { title: "Áo", items: ["Áo thun", "Áo sơ mi", "Áo polo", "Áo len", "Áo khoác"] },
+    { title: "Quần", items: ["Quần jeans", "Quần dài", "Quần short", "Đồ mặc nhà"] },
+  ],
+  nu: [
+    { title: "Áo", items: ["Áo thun", "Áo sơ mi", "Áo len", "Áo khoác"] },
+    { title: "Thời trang nữ", items: ["Váy", "Quần dài", "Quần short", "Đồ mặc nhà", "Đồ lót"] },
+  ],
+  "tre-em": [
+    { title: "Quần áo", items: ["Áo thun", "Áo sơ mi", "Áo khoác", "Áo len"] },
+    { title: "Trang phục", items: ["Quần dài", "Quần short", "Đồ mặc nhà", "Đồ mặc ngoài"] },
+  ],
+  "em-be": [
+    { title: "Quần áo em bé", items: ["Áo em bé", "Quần em bé", "Bộ đồ em bé", "Đồ liền thân"] },
+    { title: "Đồ dùng", items: ["Đồ mặc nhà", "Đồ giữ ấm", "Phụ kiện em bé"] },
+  ],
+};
+
 export default function Header() {
   const { isLoggedIn, role } = useDemoAuth();
+  const [openMenu, setOpenMenu] = useState("");
   const [categories, setCategories] = useState<Array<Pick<ApiCategory, "name" | "slug">>>(productCategories.map((category) => ({
     name: category.name,
     slug: category.slug,
@@ -20,7 +46,7 @@ export default function Header() {
       fetch(`${API_BASE_URL}/catalog/categories`)
         .then(readApiResponse<ApiCategory[]>)
         .then((items) => {
-          if (active && items.length) setCategories(items);
+          if (active && items.length) setCategories(orderCategories(items));
         })
         .catch(() => {
           if (active) setCategories(productCategories.map((category) => ({
@@ -47,11 +73,84 @@ export default function Header() {
           <Image src="/logo-vcs.png" alt="VCS" width={64} height={54} />
         </Link>
         <nav className="nav-links" aria-label="Danh mục">
-          {categories.map((category) => (
-            <Link key={category.slug} href={`/categories/${category.slug}`}>
-              {category.name}
-            </Link>
-          ))}
+          {categories.map((category) => {
+            const menu = categoryMenus[category.slug];
+            const menuId = `category-menu-${category.slug}`;
+            return (
+              <div
+                className="nav-category"
+                key={category.slug}
+                onMouseEnter={() => {
+                  if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+                    setOpenMenu(category.slug);
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+                    setOpenMenu("");
+                  }
+                }}
+                onFocus={(event) => {
+                  if (event.target instanceof HTMLElement && event.target.matches(":focus-visible")) {
+                    setOpenMenu(category.slug);
+                  }
+                }}
+                onBlur={(event) => {
+                  if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) {
+                    setOpenMenu("");
+                  }
+                }}
+              >
+                <button
+                  className="nav-category-trigger"
+                  type="button"
+                  aria-expanded={openMenu === category.slug}
+                  aria-haspopup="true"
+                  aria-controls={menuId}
+                  onClick={() => {
+                    if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+                    setOpenMenu((current) => current === category.slug ? "" : category.slug);
+                  }}
+                >
+                  {category.name}
+                  <span className="nav-category-chevron" aria-hidden="true">⌄</span>
+                </button>
+                {menu && (
+                  <div
+                    className={`nav-mega-menu${openMenu === category.slug ? " open" : ""}`}
+                    id={menuId}
+                  >
+                    <div className="nav-mega-intro">
+                      <span>KHÁM PHÁ</span>
+                      <strong>{category.name}</strong>
+                      <Link href={`/categories/${category.slug}`} onClick={() => setOpenMenu("")}>
+                        Xem tất cả sản phẩm <span aria-hidden="true">→</span>
+                      </Link>
+                    </div>
+                    <div className="nav-mega-groups">
+                      {menu.map((group) => (
+                        <div className="nav-mega-group" key={group.title}>
+                          <h2>{group.title}</h2>
+                          {group.items.map((item) => {
+                            const query = new URLSearchParams({ category: category.name, q: item });
+                            return (
+                              <Link
+                                href={`/products?${query.toString()}`}
+                                key={item}
+                                onClick={() => setOpenMenu("")}
+                              >
+                                {item}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </nav>
         <div className="nav-actions">
           {isLoggedIn && role === "admin" && <Link href="/admin" aria-label="Quản trị cửa hàng">Admin</Link>}

@@ -7,6 +7,13 @@ import { productCategories } from "@/data/categories";
 import { API_BASE_URL, readApiResponse, type ApiCategory } from "@/lib/api";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 
+const hiddenProductCodesByCategory: Record<string, ReadonlySet<string>> = {
+  "em-be": new Set(["baby-010", "baby-011", "baby-012"]),
+  nam: new Set(["jacket-002"]),
+  nu: new Set(["tee-003", "women-005"]),
+  "tre-em": new Set(["kids-007", "kids-008", "kids-009"]),
+};
+
 export default function CategoryPage({ slug }: { slug: string }) {
   const staticCategory = productCategories.find((item) => item.slug === slug);
   const [category, setCategory] = useState<ApiCategory | null>(null);
@@ -29,7 +36,11 @@ export default function CategoryPage({ slug }: { slug: string }) {
 
   const categoryName = category?.name ?? staticCategory?.name;
   const categoryDescription = category?.description ?? staticCategory?.description;
-  const categoryProducts = products.filter((product) => product.category === categoryName);
+  const hiddenProductCodes = hiddenProductCodesByCategory[slug];
+  const categoryProducts = products.filter((product) =>
+    product.category === categoryName
+    && !hiddenProductCodes?.has(product.code.toLowerCase()),
+  );
 
   return (
     <section className="catalog-page">

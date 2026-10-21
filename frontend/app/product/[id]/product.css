@@ -5,6 +5,7 @@
 .product-gallery{min-width:0;background:#f6f6f6}
 .product-main-image{display:block;width:100%;max-height:900px;aspect-ratio:4/5;object-fit:cover}
 .product-image-caption{margin:0;padding:9px 12px;color:#666;font-size:11px}
+.product-image-error{margin:0;padding:10px 12px;color:#9b1c1c;background:#fff1f0;font-size:12px}
 .product-info{position:sticky;top:24px;align-self:start;padding:8px 0}
 .product-code{margin:0;color:#777;font-size:11px}
 .product-title{margin:8px 0 12px;font-size:25px;line-height:1.35;font-weight:500}

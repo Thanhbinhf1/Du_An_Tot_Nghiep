@@ -19,10 +19,79 @@ export default function ProductDetailPage() {
   const [productError, setProductError] = useState("");
   const [size, setSize] = useState(localProduct?.sizes[0] ?? "");
   const [color, setColor] = useState(localProduct?.color ?? "");
+  const [variantImage, setVariantImage] = useState<{ key: string; src: string } | null>(null);
+  const [imageError, setImageError] = useState<{ key: string; message: string } | null>(null);
   const [added, setAdded] = useState(false);
   const wishlistIds = useWishlistIds();
   const { products } = useCatalogProducts();
   const product = apiProduct ?? localProduct;
+  const variantKey = product ? `${product.id}:${product.image}:${color}` : "";
+
+  useEffect(() => {
+    if (!product) return;
+
+    if (product.code !== "458824" || !product.image.endsWith("/jacket-sage.jpg") || color === "55 GREEN") {
+      return;
+    }
+
+    const sourceImage = new Image();
+    sourceImage.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = sourceImage.naturalWidth;
+        canvas.height = sourceImage.naturalHeight;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) throw new Error("Trình duyệt không hỗ trợ xử lý ảnh.");
+
+        context.drawImage(sourceImage, 0, 0);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+
+        for (let index = 0; index < imageData.data.length; index += 4) {
+          const red = imageData.data[index];
+          const green = imageData.data[index + 1];
+          const blue = imageData.data[index + 2];
+          const max = Math.max(red, green, blue);
+          const min = Math.min(red, green, blue);
+          const saturation = max === 0 ? 0 : (max - min) / max;
+          const brightness = (red * 0.299 + green * 0.587 + blue * 0.114) / 255;
+          let hue = 0;
+
+          if (max !== min) {
+            if (max === red) hue = ((green - blue) / (max - min)) % 6;
+            else if (max === green) hue = (blue - red) / (max - min) + 2;
+            else hue = (red - green) / (max - min) + 4;
+            hue = (hue * 60 + 360) % 360;
+          }
+
+          if (hue < 35 || hue > 165 || saturation < 0.035) continue;
+
+          const mask = Math.min(1, (saturation - 0.035) / 0.065);
+          const shade = color === "09 BLACK"
+            ? 0.32 + brightness * 0.62
+            : 0.72 + brightness * 0.28;
+          const target = color === "09 BLACK" ? 24 : 255;
+          imageData.data[index] = red * (1 - mask) + target * shade * mask;
+          imageData.data[index + 1] = green * (1 - mask) + target * shade * mask;
+          imageData.data[index + 2] = blue * (1 - mask) + target * shade * mask;
+        }
+
+        context.putImageData(imageData, 0, 0);
+        setVariantImage({ key: variantKey, src: canvas.toDataURL("image/jpeg", 0.92) });
+      } catch (error: unknown) {
+        setImageError({
+          key: variantKey,
+          message: error instanceof Error ? error.message : "Không thể đổi màu ảnh sản phẩm.",
+        });
+      }
+    };
+    sourceImage.onerror = () => setImageError({ key: variantKey, message: "Không thể tải ảnh sản phẩm để đổi màu." });
+    sourceImage.src = product.image;
+
+    return () => {
+      sourceImage.onload = null;
+      sourceImage.onerror = null;
+    };
+  }, [color, product, variantKey]);
 
   useEffect(() => {
     if (localProduct) return;
@@ -59,8 +128,13 @@ export default function ProductDetailPage() {
 
       <div className="product-detail">
         <div className="product-gallery">
-          <img className="product-main-image" src={product.image} alt={product.name} />
-          <p className="product-image-caption">{product.name}</p>
+          <img
+            className="product-main-image"
+            src={variantImage?.key === variantKey ? variantImage.src : product.image}
+            alt={`${product.name} - màu ${color}`}
+          />
+          <p className="product-image-caption">{product.name} · {color}</p>
+          {imageError?.key === variantKey && <p className="product-image-error" role="status">{imageError.message}</p>}
         </div>
 
         <section className="product-info" aria-label="Thông tin sản phẩm">
@@ -86,7 +160,7 @@ export default function ProductDetailPage() {
                     aria-pressed={color === value}
                     onClick={() => setColor(value)}
                   >
-                    <span className={`color-swatch swatch-${value.toLowerCase().replace(/[^a-z]+/g, "-")}`} />
+                    <span className={`color-swatch swatch-${value.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} />
                   </button>
                 ))}
             </div>

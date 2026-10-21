@@ -15,7 +15,11 @@ export function useCatalogProducts() {
       .then(readApiResponse<ApiProduct[]>)
       .then((result) => {
         if (!active) return;
-        setProducts(result.map(mapApiProduct));
+        const catalogProducts = result.map(mapApiProduct);
+        const localShowcaseProducts = sampleProducts.filter((product) =>
+          product.id.includes("-featured-"),
+        );
+        setProducts([...catalogProducts, ...localShowcaseProducts]);
         setError("");
       })
       .catch((cause: unknown) => {
