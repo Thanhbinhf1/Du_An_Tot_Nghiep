@@ -32,7 +32,32 @@
   width: 42px;
   height: 42px;
   flex: 0 0 42px;
-  font-size: 21px;
+  color: #315b57;
+  background: #edf4f1;
+}
+
+.category-section .category-icon svg {
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.category-section .category-icon-nu {
+  color: #80556b;
+  background: #f7eef2;
+}
+
+.category-section .category-icon-tre-em {
+  color: #536b91;
+  background: #eef2f8;
+}
+
+.category-section .category-icon-em-be {
+  color: #9a7443;
+  background: #f8f2e8;
 }
 
 .category-subcategory-list {

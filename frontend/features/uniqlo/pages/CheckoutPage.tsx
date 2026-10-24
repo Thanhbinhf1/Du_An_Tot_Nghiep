@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import FraudWarning from "@/components/layout/FraudWarning";
 import OrderSummary from "@/components/cart/OrderSummary";
 import { products } from "@/data/products";
 
@@ -14,7 +13,6 @@ export default function CheckoutPage() {
 
   return (
     <div className="container">
-      <FraudWarning />
       <h1 className="page-title">Thanh toán</h1>
       <p className="small">Đủ điều kiện áp dụng miễn phí vận chuyển.</p>
       <div className="two-column">

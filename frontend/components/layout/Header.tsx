@@ -65,9 +65,6 @@ export default function Header() {
 
   return (
     <header className="header">
-      <div className="warning-bar">
-        ⚠ CẢNH GIÁC VỚI LỪA ĐẢO GIAO HÀNG. Chỉ thanh toán tiền mặt khi trực tiếp nhận hàng.
-      </div>
       <div className="site-main nav">
         <Link href="/" className="logo" aria-label="Trang chủ">
           <Image src="/logo-vcs.png" alt="VCS" width={64} height={54} />

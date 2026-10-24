@@ -21,6 +21,45 @@ const categorySubcategories: Record<string, string[]> = {
   "em-be": ["Áo em bé", "Quần em bé", "Bộ đồ em bé", "Đồ liền thân", "Đồ mặc nhà", "Đồ giữ ấm"],
 };
 const categoryOrder = ["nam", "nu", "tre-em", "em-be"];
+function CategoryIcon({ slug }: { slug: string }) {
+  if (slug === "nam") {
+    return (
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="m10 5-6 4 3 6 4-2v14h10V13l4 2 3-6-6-4-3 3h-6l-3-3Z" />
+        <path d="m13 8 3 4 3-4" />
+      </svg>
+    );
+  }
+  if (slug === "nu") {
+    return (
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M13 5h6l1 6 6 15H6l6-15 1-6Z" />
+        <path d="M12 11h8M13 5l3 4 3-4" />
+      </svg>
+    );
+  }
+  if (slug === "tre-em") {
+    return (
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="m10 7-7 4 3 6 4-2v11h12V15l4 2 3-6-7-4-3 3h-6l-3-3Z" />
+        <path d="M13 10h6" />
+      </svg>
+    );
+  }
+  if (slug === "em-be") {
+    return (
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M11 5a5 5 0 0 1 10 0v3l5 4v7l-3 2v6H9v-6l-3-2v-7l5-4V5Z" />
+        <path d="M11 8h10M12 15l4 3 4-3M16 18v9" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <path d="M6 9h20v16H6zM10 9V6h12v3M11 15h10" />
+    </svg>
+  );
+}
 export default function HomePage(){
   const { products, error: productError } = useCatalogProducts();
   const [categories, setCategories] = useState<Array<Pick<ApiCategory, "name" | "slug">>>(
@@ -54,10 +93,12 @@ export default function HomePage(){
   <section className="category-section">
     <h2>Khám phá theo danh mục</h2>
     <div className="category-grid">
-      {categories.map((category, i) => (
+      {categories.map((category) => (
         <div className="category-item" key={category.slug}>
           <Link className="category-main-link" href={`/categories/${category.slug}`}>
-            <span className="category-icon" aria-hidden="true">{["♧","◉","▤","▥"][i%4]}</span>
+            <span className={`category-icon category-icon-${category.slug}`}>
+              <CategoryIcon slug={category.slug} />
+            </span>
             <span>{category.name}</span>
           </Link>
           <div className="category-subcategory-list" aria-label={`Danh mục con ${category.name}`}>

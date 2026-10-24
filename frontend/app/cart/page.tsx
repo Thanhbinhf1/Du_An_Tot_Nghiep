@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import FraudWarning from "@/components/layout/FraudWarning";
 import OrderSummary from "@/components/cart/OrderSummary";
 import ProductCard from "@/components/product/ProductCard";
 import { formatVnd } from "@/data/products";
@@ -29,7 +28,6 @@ export default function CartPage() {
 
   return (
     <div className="container">
-      <FraudWarning />
       <h1 className="page-title">Giỏ hàng</h1>
       {!cartItems.length ? (
         <div className="empty-state cart-empty">

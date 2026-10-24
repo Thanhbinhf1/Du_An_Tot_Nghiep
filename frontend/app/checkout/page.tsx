@@ -3,7 +3,6 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import FraudWarning from "@/components/layout/FraudWarning";
 import OrderSummary from "@/components/cart/OrderSummary";
 import { formatVnd } from "@/data/products";
 import { createDemoOrder, saveDemoAddress, useCartItems, useDemoAddress } from "@/lib/storefront-demo";
@@ -57,7 +56,6 @@ function CheckoutContent({
 
   return (
     <div className="container checkout-page">
-      <FraudWarning />
       <div className="checkout-title">
         <div><div className="breadcrumb"><Link href="/cart">Giỏ hàng</Link> / Thanh toán</div><h1 className="page-title">Thanh toán</h1></div>
         <Link href="/cart">← Quay lại giỏ hàng</Link>

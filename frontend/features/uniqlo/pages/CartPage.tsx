@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import FraudWarning from "@/components/layout/FraudWarning";
 import OrderSummary from "@/components/cart/OrderSummary";
 import ProductCard from "@/components/product/ProductCard";
 import { formatVnd, products } from "@/data/products";
@@ -15,7 +14,6 @@ export default function CartPage() {
 
   return (
     <div className="container">
-      <FraudWarning />
       <h1 className="page-title">Giỏ hàng</h1>
       <div className="two-column">
         <section>

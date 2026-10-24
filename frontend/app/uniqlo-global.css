@@ -32,7 +32,6 @@ button { cursor: pointer; }
 .pill-button.red { background: var(--red); color: white; border-color: var(--red); }
 .pill-button:disabled { opacity: .45; cursor: not-allowed; }
 .header { position: relative; z-index: 20; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
-.warning-bar { background: var(--red); color: #fff; padding: 8px 12px; font-size: 11px; text-align: center; }
 .nav { position: relative; min-height: 58px; display: flex; align-items: center; gap: 28px; }
 .logo { width: 64px; height: 54px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .logo img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
@@ -88,12 +87,6 @@ button { cursor: pointer; }
 .profile-shortcuts a > span { grid-row: span 2; font-size: 25px; }
 .profile-shortcuts strong { font-size: 13px; font-weight: 500; }
 .profile-shortcuts small { color: var(--muted); }
-.fraud-warning { border: 4px solid var(--red); display: flex; align-items: center; gap: 26px; padding: 16px 26px; margin: 22px 0; }
-.warning-symbol { font-size: 54px; color: var(--red); line-height: 1; }
-.fraud-warning h2 { margin: 0; color: var(--red); font-size: 30px; line-height: 1.1; }
-.fraud-warning h3 { margin: 0; font-size: 21px; }
-.fraud-warning p { margin: 4px 0 0; font-size: 12px; }
-.fraud-action { margin-left: auto; white-space: nowrap; }
 .footer { margin-top: 54px; background: #f4f4f4; padding: 32px max(24px, calc((100% - var(--content)) / 2)); color: #555; font-size: 12px; }
 .footer-links { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
 .footer-copy { margin-top: 34px; color: #888; }
@@ -216,11 +209,6 @@ button { cursor: pointer; }
   .nav-mega-groups { gap: 18px; }
   .nav-mega-group { gap: 9px; }
   .nav-actions { gap: 12px; }
-  .fraud-warning { gap: 12px; padding: 12px; border-width: 3px; }
-  .warning-symbol { font-size: 36px; }
-  .fraud-warning h2 { font-size: 20px; }
-  .fraud-warning h3 { font-size: 15px; }
-  .fraud-action { display: none; }
   .two-column, .wishlist-layout, .product-detail { grid-template-columns: 1fr; gap: 22px; }
   .summary-column { order: -1; }
   .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
