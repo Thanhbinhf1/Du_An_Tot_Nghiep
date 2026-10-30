@@ -17,6 +17,7 @@
 .admin-actions { display: flex; gap: 8px; }
 .admin-actions button { border: 1px solid #bbb; padding: 8px 12px; background: #fff; }
 .admin-actions .danger { color: #b00020; }
+.admin-actions .admin-button { background: #111; border-color: #111; color: #fff; }
 .admin-table { width: 100%; border-collapse: collapse; }
 .admin-table th, .admin-table td { border-bottom: 1px solid #eee; padding: 12px 8px; text-align: left; vertical-align: middle; }
 .admin-table th { color: #666; font-size: 11px; font-weight: 500; }
@@ -24,8 +25,22 @@
 .admin-alert { margin: 14px 0; padding: 12px; background: #fff2f2; color: #a00000; }
 .admin-success { margin: 14px 0; color: #267844; }
 .admin-login-prompt { max-width: 540px; margin: 50px auto; border: 1px solid #ddd; padding: 30px; text-align: center; }
+.admin-tabs { flex-wrap: wrap; }
+.variant-fieldset { border: 0; min-width: 0; padding: 0; margin: 22px 0; }
+.variant-fieldset legend { font-size: 16px; margin-bottom: 14px; }
+.variant-picker { margin-top: 22px; }
+.variant-pagination { align-items: center; margin-top: 14px; }
+.variant-table-wrap { overflow-x: auto; }
+.variant-table-wrap .admin-table { display: table; min-width: 650px; }
+.variant-table-wrap .admin-actions button { position: relative; }
+.variant-caption { text-align: left; padding: 12px 8px; color: #666; }
+.variant-status { display: inline-block; padding: 4px 8px; border-radius: 4px; white-space: nowrap; }
+.variant-status.selling { background: #e9f5ed; color: #226538; }
+.variant-status.stopped { background: #f2f2f2; color: #555; }
+.admin-page button:disabled { opacity: .5; cursor: not-allowed; }
+.admin-page button:focus-visible, .admin-page input:focus-visible, .admin-page select:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 @media (max-width: 700px) {
-  .admin-heading, .admin-row { align-items: flex-start; flex-direction: column; }
+  .admin-heading, .admin-row, .admin-toolbar { align-items: flex-start; flex-direction: column; }
   .admin-form { grid-template-columns: 1fr; }
   .admin-form .wide { grid-column: auto; }
   .admin-table { display: block; overflow-x: auto; white-space: nowrap; }

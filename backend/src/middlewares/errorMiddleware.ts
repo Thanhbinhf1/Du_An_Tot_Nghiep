@@ -13,10 +13,13 @@ export const errorHandler = (
   _next: NextFunction,
 ) => {
   const duplicateKey = typeof err === "object" && err !== null && "code" in err && err.code === 11000;
+  const invalidJson = err instanceof SyntaxError && "type" in err && err.type === "entity.parse.failed";
   const statusCode = err instanceof AppError
     ? err.statusCode
     : duplicateKey
       ? 409
+      : invalidJson
+        ? 400
       : err instanceof multer.MulterError
         ? 400
         : 500;

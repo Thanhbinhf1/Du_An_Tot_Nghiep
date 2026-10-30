@@ -8,6 +8,7 @@ import { API_BASE_URL, authenticatedHeaders, readApiResponse } from "@/lib/api";
 import { signOutDemo, useDemoAuth } from "@/lib/demo-auth";
 import type { Product } from "@/types/product";
 import "./admin.css";
+import ProductVariantsManager from "./ProductVariantsManager";
 
 type Category = { _id: string; name: string; slug: string; description?: string };
 type StoredProduct = Omit<Product, "id" | "category"> & {
@@ -29,7 +30,7 @@ export default function AdminPage() {
   const router = useRouter();
   const { isLoggedIn, role, token, isHydrated } = useDemoAuth();
   const [verified, setVerified] = useState(false);
-  const [section, setSection] = useState<"products" | "categories">("products");
+  const [section, setSection] = useState<"products" | "categories" | "variants">("products");
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<StoredProduct[]>([]);
   const [productForm, setProductForm] = useState(blankProduct);
@@ -219,11 +220,12 @@ export default function AdminPage() {
       <div className="admin-tabs">
         <button className={section === "products" ? "active" : ""} onClick={() => setSection("products")}>Sản phẩm ({products.length})</button>
         <button className={section === "categories" ? "active" : ""} onClick={() => setSection("categories")}>Danh mục ({categories.length})</button>
+        <button className={section === "variants" ? "active" : ""} onClick={() => setSection("variants")}>Biến thể sản phẩm</button>
       </div>
       {error && <p className="admin-alert" role="alert">{error}</p>}
       {success && <p className="admin-success" role="status">{success}</p>}
 
-      {section === "categories" ? (
+      {section === "variants" ? <ProductVariantsManager request={adminRequest} /> : section === "categories" ? (
         <>
           <div className="admin-panel">
             <h2>{editingCategory ? "Sửa danh mục" : "Tạo danh mục mới"}</h2>
