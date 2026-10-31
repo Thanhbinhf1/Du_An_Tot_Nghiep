@@ -27,7 +27,7 @@ export function OrderHistory() {
     <section className="orders-page">
       <div className="breadcrumb"><Link href="/">Trang chủ</Link> / Tài khoản / Đơn hàng</div>
       <h1>Đơn hàng của tôi</h1>
-      <p className="muted">Xem lại đơn hàng và cập nhật trạng thái giao hàng demo.</p>
+      <p className="muted">Lịch sử đơn hàng demo được lưu riêng theo tài khoản trên trình duyệt này.</p>
       {orders.length ? <div className="order-list">{orders.map((order) => <OrderCard key={order.id} order={order} products={products} />)}</div> : (
         <div className="empty-state"><h2>Bạn chưa có đơn hàng</h2><p>Đơn hàng sẽ xuất hiện tại đây sau khi bạn hoàn tất checkout.</p><Link className="pill-button dark" href="/products">Mua sắm ngay</Link></div>
       )}

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_BASE_URL, readApiResponse } from "@/lib/api";
 import { signIn } from "@/lib/demo-auth";
+import { saveDemoProfileNameIfMissing } from "@/lib/storefront-demo";
 import styles from "../auth.module.css";
 
 export default function DangKyPage() {
@@ -38,10 +39,12 @@ export default function DangKyPage() {
       });
       const user = await readApiResponse<{
         email: string;
+        name: string;
         role: "customer" | "staff" | "admin";
         token: string;
       }>(response);
       signIn(user.email, user.role, user.token, true);
+      saveDemoProfileNameIfMissing(user.name);
       router.push("/profile");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Không thể tạo tài khoản.");

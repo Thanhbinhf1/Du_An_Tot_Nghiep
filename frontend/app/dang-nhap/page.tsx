@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { signIn } from "@/lib/demo-auth";
+import { saveDemoProfileNameIfMissing } from "@/lib/storefront-demo";
 import { API_BASE_URL, readApiResponse } from "@/lib/api";
 import styles from "../auth.module.css";
 
@@ -30,10 +31,12 @@ export default function DangNhapPage() {
       });
       const user = await readApiResponse<{
         email: string;
+        name?: string;
         role: "customer" | "staff" | "admin";
         token: string;
       }>(response);
       signIn(user.email, user.role, user.token, remember);
+      if (user.name) saveDemoProfileNameIfMissing(user.name);
       router.push(user.role === "admin" ? "/admin" : "/profile");
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Không thể đăng nhập.");

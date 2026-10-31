@@ -2,6 +2,12 @@
 
 import { useSyncExternalStore } from "react";
 import type { Product } from "@/types/product";
+import {
+  getCurrentDemoAccountStorageKey,
+  getDemoAccountStorageKey,
+  isDemoAuthenticated,
+  useDemoAuth,
+} from "@/lib/demo-auth";
 
 export type CartItem = { productId: string; size: string; color?: string; quantity: number };
 export type DeliveryAddress = {
@@ -25,53 +31,66 @@ function notify() {
   window.dispatchEvent(new Event("bapd-storefront-change"));
 }
 
-function readStorage(key: string) {
+function readStorage(key: string, account?: string) {
   return typeof window === "undefined"
     ? emptyArray
-    : localStorage.getItem(key) ?? emptyArray;
+    : localStorage.getItem(
+        account === undefined
+          ? getCurrentDemoAccountStorageKey(key)
+          : getDemoAccountStorageKey(account, key),
+      ) ?? emptyArray;
 }
 
 function subscribe(callback: () => void) {
   window.addEventListener("storage", callback);
   window.addEventListener("bapd-storefront-change", callback);
+  window.addEventListener("bapd-demo-auth-change", callback);
   return () => {
     window.removeEventListener("storage", callback);
     window.removeEventListener("bapd-storefront-change", callback);
+    window.removeEventListener("bapd-demo-auth-change", callback);
   };
 }
 
 export function useCartItems() {
+  const { account, isLoggedIn } = useDemoAuth();
   const snapshot = useSyncExternalStore(
     subscribe,
-    () => readStorage("bapd-cart"),
+    () => isLoggedIn && account ? readStorage("bapd-cart", account) : emptyArray,
     () => emptyArray,
   );
   return JSON.parse(snapshot) as CartItem[];
 }
 
 export function readCartItems() {
+  if (!isDemoAuthenticated()) return [];
   return JSON.parse(readStorage("bapd-cart")) as CartItem[];
 }
 
 export function saveCartItems(items: CartItem[]) {
-  localStorage.setItem("bapd-cart", JSON.stringify(items));
+  if (!isDemoAuthenticated()) return false;
+  localStorage.setItem(getCurrentDemoAccountStorageKey("bapd-cart"), JSON.stringify(items));
   notify();
+  return true;
 }
 
-export function addCartItem(productId: string, size: string, color: string) {
+export function addCartItem(productId: string, size: string, color: string, quantity = 1) {
+  if (!isDemoAuthenticated()) return false;
   const items = readCartItems();
   const existing = items.find(
     (item) => item.productId === productId && item.size === size && item.color === color,
   );
-  if (existing) existing.quantity += 1;
-  else items.push({ productId, size, color, quantity: 1 });
+  if (existing) existing.quantity += quantity;
+  else items.push({ productId, size, color, quantity });
   saveCartItems(items);
+  return true;
 }
 
 export function useWishlistIds() {
+  const { account } = useDemoAuth();
   const snapshot = useSyncExternalStore(
     subscribe,
-    () => readStorage("bapd-wishlist"),
+    () => readStorage("bapd-wishlist", account),
     () => emptyArray,
   );
   return JSON.parse(snapshot) as string[];
@@ -82,40 +101,56 @@ export function toggleWishlist(productId: string) {
   const next = ids.includes(productId)
     ? ids.filter((id) => id !== productId)
     : [...ids, productId];
-  localStorage.setItem("bapd-wishlist", JSON.stringify(next));
+  localStorage.setItem(getCurrentDemoAccountStorageKey("bapd-wishlist"), JSON.stringify(next));
   notify();
 }
 
 export function useDemoOrders() {
+  const { account } = useDemoAuth();
   const snapshot = useSyncExternalStore(
     subscribe,
-    () => readStorage("bapd-orders"),
+    () => readStorage("bapd-orders", account),
     () => emptyArray,
   );
   return JSON.parse(snapshot) as DemoOrder[];
 }
 
 export function useDemoAddress() {
+  const { account } = useDemoAuth();
   const snapshot = useSyncExternalStore(
     subscribe,
-    () => typeof window === "undefined" ? "{}" : localStorage.getItem("bapd-address") ?? "{}",
+    () => typeof window === "undefined"
+      ? "{}"
+      : localStorage.getItem(getDemoAccountStorageKey(account, "bapd-address")) ?? "{}",
     () => "{}",
   );
   return JSON.parse(snapshot) as DeliveryAddress;
 }
 
 export function saveDemoAddress(address: DeliveryAddress) {
-  localStorage.setItem("bapd-address", JSON.stringify(address));
+  localStorage.setItem(getCurrentDemoAccountStorageKey("bapd-address"), JSON.stringify(address));
+  notify();
 }
 
 export function saveDemoProfileName(name: string) {
-  localStorage.setItem("bapd-profile-name", name);
+  localStorage.setItem(getCurrentDemoAccountStorageKey("bapd-profile-name"), name);
+  notify();
+}
+
+export function saveDemoProfileNameIfMissing(name: string) {
+  const key = getCurrentDemoAccountStorageKey("bapd-profile-name");
+  if (localStorage.getItem(key)) return;
+  localStorage.setItem(key, name);
+  notify();
 }
 
 export function useDemoProfileName() {
+  const { account } = useDemoAuth();
   return useSyncExternalStore(
     subscribe,
-    () => typeof window === "undefined" ? "" : localStorage.getItem("bapd-profile-name") ?? "",
+    () => typeof window === "undefined"
+      ? ""
+      : localStorage.getItem(getDemoAccountStorageKey(account, "bapd-profile-name")) ?? "",
     () => "",
   );
 }
@@ -141,7 +176,8 @@ export function createDemoOrder(
     address,
     delivery,
   };
-  localStorage.setItem("bapd-orders", JSON.stringify([order, ...orders]));
-  localStorage.setItem("bapd-cart", emptyArray);
+  localStorage.setItem(getCurrentDemoAccountStorageKey("bapd-orders"), JSON.stringify([order, ...orders]));
+  localStorage.setItem(getCurrentDemoAccountStorageKey("bapd-cart"), emptyArray);
+  notify();
   return order;
 }

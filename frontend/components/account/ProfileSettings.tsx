@@ -24,7 +24,7 @@ function ProfileEditFormFields({ account, initialName }: { account: string; init
   return (
     <form className="settings-card" onSubmit={handleSubmit}>
       <h1>Chỉnh sửa hồ sơ</h1>
-      <p className="muted">Thông tin được lưu trên trình duyệt của bạn.</p>
+      <p className="muted">Thông tin được lưu riêng theo tài khoản trên trình duyệt này.</p>
       <label className="form-field">Họ và tên<input value={name} onChange={(event) => { setName(event.target.value); setSaved(false); }} required /></label>
       <label className="form-field">Email hoặc số điện thoại<input value={account} readOnly /></label>
       <button className="pill-button dark" type="submit">Lưu thay đổi</button>

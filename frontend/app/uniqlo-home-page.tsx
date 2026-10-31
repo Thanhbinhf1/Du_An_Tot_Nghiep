@@ -20,46 +20,13 @@ const categorySubcategories: Record<string, string[]> = {
   "tre-em": ["Áo thun", "Áo sơ mi", "Áo khoác", "Áo len", "Quần dài", "Quần short", "Đồ mặc nhà"],
   "em-be": ["Áo em bé", "Quần em bé", "Bộ đồ em bé", "Đồ liền thân", "Đồ mặc nhà", "Đồ giữ ấm"],
 };
+const categoryImages: Record<string, string> = {
+  nam: "/images/categories/nam1.webp",
+  nu: "/images/categories/nu1.jpg",
+  "tre-em": "/images/categories/treem4.webp",
+  "em-be": "/images/categories/embe1.jpg",
+};
 const categoryOrder = ["nam", "nu", "tre-em", "em-be"];
-function CategoryIcon({ slug }: { slug: string }) {
-  if (slug === "nam") {
-    return (
-      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <path d="m10 5-6 4 3 6 4-2v14h10V13l4 2 3-6-6-4-3 3h-6l-3-3Z" />
-        <path d="m13 8 3 4 3-4" />
-      </svg>
-    );
-  }
-  if (slug === "nu") {
-    return (
-      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <path d="M13 5h6l1 6 6 15H6l6-15 1-6Z" />
-        <path d="M12 11h8M13 5l3 4 3-4" />
-      </svg>
-    );
-  }
-  if (slug === "tre-em") {
-    return (
-      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <path d="m10 7-7 4 3 6 4-2v11h12V15l4 2 3-6-7-4-3 3h-6l-3-3Z" />
-        <path d="M13 10h6" />
-      </svg>
-    );
-  }
-  if (slug === "em-be") {
-    return (
-      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <path d="M11 5a5 5 0 0 1 10 0v3l5 4v7l-3 2v6H9v-6l-3-2v-7l5-4V5Z" />
-        <path d="M11 8h10M12 15l4 3 4-3M16 18v9" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <path d="M6 9h20v16H6zM10 9V6h12v3M11 15h10" />
-    </svg>
-  );
-}
 export default function HomePage(){
   const { products, error: productError } = useCatalogProducts();
   const [categories, setCategories] = useState<Array<Pick<ApiCategory, "name" | "slug">>>(
@@ -96,25 +63,32 @@ export default function HomePage(){
       {categories.map((category) => (
         <div className="category-item" key={category.slug}>
           <Link className="category-main-link" href={`/categories/${category.slug}`}>
-            <span className={`category-icon category-icon-${category.slug}`}>
-              <CategoryIcon slug={category.slug} />
-            </span>
-            <span>{category.name}</span>
+            <img
+              className="category-image"
+              src={categoryImages[category.slug] ?? "/images/categories/1.jpg"}
+              alt={category.name}
+            />
+            <span className="category-name">{category.name}</span>
           </Link>
-          <div className="category-subcategory-list" aria-label={`Danh mục con ${category.name}`}>
-            {(categorySubcategories[category.slug] ?? []).map((subcategory) => {
-              const query = new URLSearchParams({ category: category.name, q: subcategory });
-              return (
-                <Link href={`/products?${query.toString()}`} key={subcategory}>
-                  {subcategory}
-                </Link>
-              );
-            })}
-          </div>
+          {(categorySubcategories[category.slug] ?? []).length > 0 && (
+            <details className="category-subcategories">
+              <summary>Danh mục con</summary>
+              <div className="category-subcategory-list" aria-label={`Danh mục con ${category.name}`}>
+                {(categorySubcategories[category.slug] ?? []).map((subcategory) => {
+                  const query = new URLSearchParams({ category: category.name, q: subcategory });
+                  return (
+                    <Link href={`/products?${query.toString()}`} key={subcategory}>
+                      {subcategory}
+                    </Link>
+                  );
+                })}
+              </div>
+            </details>
+          )}
         </div>
       ))}
     </div>
-    <Link className="category-more" href="/products">Xem tất cả danh mục　→</Link>
+    <Link className="category-more" href="/products">XEM TẤT CẢ DANH MỤC SẢN PHẨM</Link>
   </section>
   {campaigns.map((c,i)=><section className={'campaign-block campaign-'+i} key={c.tag}><Link href="/products" className="campaign-banner"><img src={c.image} alt={c.title}/><div className="campaign-copy"><span>{c.tag}</span><h2>{c.title}</h2><p>{c.subtitle}</p><b>KHÁM PHÁ THÊM　→</b></div></Link>{i===0||i===1?<div className="home-products"><div className="section-heading"><h2>{i===0?"Được yêu thích":"Sản phẩm nổi bật"}</h2><Link href="/products">Xem tất cả →</Link></div><div className="home-product-grid">{products.slice(i, i+4).map((x)=><Link className="home-product" href={`/product/${x.id}`} key={x.id}><img src={x.image} alt={x.name}/><div className="home-product-meta">{x.color} · XS–XL</div><h3>{x.name}</h3><strong>{new Intl.NumberFormat("vi-VN").format(x.price)} VND</strong><div className="home-rating">★ {x.rating} <span>(99+)</span></div></Link>)}</div></div>:null}</section>)}
   <section className="lifewear-panel"><div><span>UNIQLO SPECIAL</span><h2>LifeWear Week</h2><p>Những món đồ thiết yếu để hoàn thiện phong cách của bạn.</p><Link className="hero-button" href="/products">MUA SẮM NGAY</Link></div><img src="https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1200&q=85" alt="LifeWear Week"/></section>

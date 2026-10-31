@@ -49,6 +49,12 @@ router.use(protect, requireAdmin);
 router.get("/session", (req, res) => {
   res.json({ status: "success", data: { role: "admin" } });
 });
+router.get("/orders", AdminController.getOrders);
+router.patch("/orders/:id/status", AdminController.updateOrderStatus);
+router.get("/coupons", AdminController.getCoupons);
+router.post("/coupons", AdminController.saveCoupon);
+router.put("/coupons/:id", AdminController.saveCoupon);
+router.delete("/coupons/:id", AdminController.deleteCoupon);
 router.post("/categories", AdminController.createCategory);
 router.put("/categories/:id", AdminController.updateCategory);
 router.delete("/categories/:id", AdminController.deleteCategory);

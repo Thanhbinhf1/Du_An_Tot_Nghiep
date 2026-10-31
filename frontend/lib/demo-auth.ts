@@ -19,6 +19,33 @@ function getSnapshot() {
   ]);
 }
 
+export function getCurrentDemoAccountStorageKey(key: string) {
+  if (typeof window === "undefined") return `bapd-guest:${key}`;
+  const storage =
+    localStorage.getItem("bapd-demo-authenticated") === "true"
+      ? localStorage
+      : sessionStorage;
+  const account = storage.getItem("bapd-demo-account")?.trim().toLowerCase();
+  return getDemoAccountStorageKey(account ?? "", key);
+}
+
+export function getDemoAccountStorageKey(account: string, key: string) {
+  const normalizedAccount = account.trim().toLowerCase();
+  return normalizedAccount
+    ? `bapd-account:${encodeURIComponent(normalizedAccount)}:${key}`
+    : `bapd-guest:${key}`;
+}
+
+export function isDemoAuthenticated() {
+  if (typeof window === "undefined") return false;
+  const storage =
+    localStorage.getItem("bapd-demo-authenticated") === "true"
+      ? localStorage
+      : sessionStorage;
+  return storage.getItem("bapd-demo-authenticated") === "true"
+    && Boolean(storage.getItem("bapd-demo-account")?.trim());
+}
+
 function subscribe(callback: () => void) {
   window.addEventListener("storage", callback);
   window.addEventListener("bapd-demo-auth-change", callback);

@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import ProductCard from "@/components/product/ProductCard";
+import ProductReviews from "@/components/product/ProductReviews";
 import { formatVnd, products as sampleProducts } from "@/data/products";
 import { addCartItem, toggleWishlist, useWishlistIds } from "@/lib/storefront-demo";
+import { useDemoAuth } from "@/lib/demo-auth";
 import { API_BASE_URL, mapApiProduct, readApiResponse, type ApiProduct } from "@/lib/api";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 import type { Product } from "@/types/product";
@@ -19,10 +21,12 @@ export default function ProductDetailPage() {
   const [productError, setProductError] = useState("");
   const [size, setSize] = useState(localProduct?.sizes[0] ?? "");
   const [color, setColor] = useState(localProduct?.color ?? "");
+  const [quantity, setQuantity] = useState(1);
   const [variantImage, setVariantImage] = useState<{ key: string; src: string } | null>(null);
   const [imageError, setImageError] = useState<{ key: string; message: string } | null>(null);
   const [added, setAdded] = useState(false);
   const wishlistIds = useWishlistIds();
+  const { isLoggedIn } = useDemoAuth();
   const { products } = useCatalogProducts();
   const product = apiProduct ?? localProduct;
   const variantKey = product ? `${product.id}:${product.image}:${color}` : "";
@@ -186,16 +190,44 @@ export default function ProductDetailPage() {
             </div>
           </div>
 
-          <button
-            className="product-add-button"
-            type="button"
-            onClick={() => {
-              addCartItem(product.id, size, color);
-              setAdded(true);
-            }}
-          >
-            Thêm vào giỏ hàng
-          </button>
+          <div className="product-quantity-group">
+            <p className="product-option-label">Số lượng</p>
+            <div className="product-quantity-control" aria-label="Chọn số lượng sản phẩm">
+              <button
+                type="button"
+                aria-label="Giảm số lượng"
+                disabled={quantity <= 1}
+                onClick={() => setQuantity((current) => Math.max(1, current - 1))}
+              >
+                −
+              </button>
+              <span aria-live="polite">{quantity}</span>
+              <button
+                type="button"
+                aria-label="Tăng số lượng"
+                onClick={() => setQuantity((current) => current + 1)}
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          {isLoggedIn ? (
+            <button
+              className="product-add-button"
+              type="button"
+              onClick={() => {
+                if (addCartItem(product.id, size, color, quantity)) setAdded(true);
+              }}
+            >
+              Thêm {quantity > 1 ? `${quantity} sản phẩm vào` : "vào"} giỏ hàng
+            </button>
+          ) : (
+            <div className="product-login-required" role="status">
+              <p>Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng.</p>
+              <Link className="product-add-button" href="/dang-nhap">Đăng nhập</Link>
+            </div>
+          )}
           <button
             className={`product-wishlist-button${favorite ? " active" : ""}`}
             type="button"
@@ -227,6 +259,8 @@ export default function ProductDetailPage() {
           </div>
         </section>
       </div>
+
+      <ProductReviews key={product.id} productId={product.id} />
 
       <section className="related-products">
         <h2 className="section-title">Sản phẩm bạn có thể quan tâm</h2>
