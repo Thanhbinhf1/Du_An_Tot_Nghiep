@@ -1,6 +1,6 @@
 import { Router } from "express";
 import productVariantRoutes from "./productVariantRoutes.js";
-
+import productImageRoutes from "./productImageRoutes.js";
 import {
   getProducts,
   getAdminProducts,
@@ -14,6 +14,7 @@ import { protect, type AuthRequest } from "../middlewares/authMiddleware.js";
 
 const router = Router();
 router.use("/:productId/variants", productVariantRoutes);
+router.use("/:productId/images", productImageRoutes);
 
 // Kiểm tra quyền admin
 const requireAdmin = (
