@@ -5,6 +5,22 @@ import Product from "../models/productModel.js";
 import ProductImage from "../models/productImageModel.js";
 import ProductVariant from "../models/productVariantModel.js";
 
+// GET /api/products/admin - Dữ liệu quản trị, gồm cả sản phẩm đã tắt.
+export const getAdminProducts = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit) || 25)));
+    if (!Number.isSafeInteger(page) || !Number.isSafeInteger(limit)) {
+      return res.status(400).json({ message: "Phân trang không hợp lệ" });
+    }
+    const [products, total] = await Promise.all([
+      Product.find({}).sort({ created_at: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      Product.countDocuments({}),
+    ]);
+    return res.status(200).json({ data: products, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (error) { next(error); }
+};
+
 // GET /api/products - Lấy danh sách sản phẩm
 export const getProducts = async (
   req: Request,

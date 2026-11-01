@@ -43,12 +43,19 @@ const productVariantSchema = new Schema<IProductVariant>(
       type: Number,
       required: [true, "Vui lòng nhập Giá bán gốc"],
       min: [0, "Giá tiền không được nhỏ hơn 0"],
+      validate: { validator: Number.isFinite, message: "Giá tiền phải là số hữu hạn" },
     },
 
     sale_price: {
       type: Number,
       default: null,
       min: [0, "Giá khuyến mãi không được nhỏ hơn 0"],
+      validate: {
+        validator: function (value: number | null | undefined) {
+          return value == null || (Number.isFinite(value) && value <= this.get("price"));
+        },
+        message: "Giá khuyến mãi phải là số hữu hạn và không vượt quá giá gốc",
+      },
     },
 
     stock_quantity: {
@@ -56,6 +63,7 @@ const productVariantSchema = new Schema<IProductVariant>(
       required: [true, "Vui lòng nhập Số lượng tồn kho"],
       min: [0, "Tồn kho không được âm"],
       default: 0,
+      validate: { validator: Number.isSafeInteger, message: "Tồn kho phải là số nguyên an toàn" },
     },
 
     status: {
@@ -65,6 +73,7 @@ const productVariantSchema = new Schema<IProductVariant>(
   },
   {
     timestamps: false,
+    optimisticConcurrency: true,
   },
 );
 

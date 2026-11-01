@@ -8,6 +8,7 @@ import { API_BASE_URL, authenticatedHeaders, readApiResponse } from "@/lib/api";
 import { signOutDemo, useDemoAuth } from "@/lib/demo-auth";
 import type { Product } from "@/types/product";
 import "./admin.css";
+import ProductVariantsManager from "./ProductVariantsManager";
 
 type Category = { _id: string; name: string; slug: string; description?: string };
 type StoredProduct = Omit<Product, "id" | "category"> & {
@@ -61,6 +62,7 @@ const blankCoupon = {
   status: true,
 };
 const adminSections = [
+  { id: "variants", label: "Biến thể sản phẩm", icon: "▦" },
   { id: "products", label: "Sản phẩm", icon: "▦" },
   { id: "categories", label: "Danh mục", icon: "◇" },
   { id: "orders", label: "Đơn hàng", icon: "▤" },
@@ -345,7 +347,7 @@ export default function AdminPage() {
           {adminSections.map((item) => (
             <button key={item.id} type="button" className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)}>
               <span className="admin-nav-icon">{item.icon}</span>{item.label}
-              <span className="admin-nav-count">{item.id === "products" ? products.length : item.id === "categories" ? categories.length : item.id === "orders" ? orders.length : coupons.length}</span>
+              {item.id !== "variants" && <span className="admin-nav-count">{item.id === "products" ? products.length : item.id === "categories" ? categories.length : item.id === "orders" ? orders.length : coupons.length}</span>}
             </button>
           ))}
         </nav>
@@ -370,6 +372,8 @@ export default function AdminPage() {
           </div>
           {error && <p className="admin-alert" role="alert">{error}</p>}
           {success && <p className="admin-success" role="status">{success}</p>}
+
+          {section === "variants" && <div className="admin-panel"><ProductVariantsManager request={adminRequest} /></div>}
 
           {section === "categories" && <>
             <div className="admin-panel"><h2>{editingCategory ? "Sửa danh mục" : "Tạo danh mục mới"}</h2>

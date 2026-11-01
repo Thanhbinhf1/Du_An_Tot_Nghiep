@@ -1,7 +1,9 @@
 import { Router } from "express";
-
+import productVariantRoutes from "./productVariantRoutes.js";
+import productImageRoutes from "./productImageRoutes.js";
 import {
   getProducts,
+  getAdminProducts,
   getProductById,
   createProduct,
   updateProduct,
@@ -11,6 +13,8 @@ import {
 import { protect, type AuthRequest } from "../middlewares/authMiddleware.js";
 
 const router = Router();
+router.use("/:productId/variants", productVariantRoutes);
+router.use("/:productId/images", productImageRoutes);
 
 // Kiểm tra quyền admin
 const requireAdmin = (
@@ -28,6 +32,7 @@ const requireAdmin = (
 };
 
 // Đọc sản phẩm công khai
+router.get("/admin", protect, requireAdmin, getAdminProducts);
 router.get("/", getProducts);
 router.get("/:id", getProductById);
 

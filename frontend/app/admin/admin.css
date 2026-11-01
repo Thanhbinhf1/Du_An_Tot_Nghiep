@@ -918,3 +918,17 @@ body:has(.admin-shell) > .footer {
     font-size: 9px;
   }
 }
+
+/* Product variant management within the shared admin layout. */
+.variant-fieldset { border: 0; min-width: 0; padding: 0; margin: 22px 0; }
+.variant-fieldset legend { font-size: 16px; margin-bottom: 14px; }
+.variant-picker { margin-top: 22px; }
+.variant-pagination { align-items: center; margin-top: 14px; }
+.variant-table-wrap { overflow-x: auto; }
+.variant-table-wrap .admin-table { display: table; min-width: 650px; }
+.variant-table-wrap .admin-actions button { position: relative; }
+.variant-caption { text-align: left; padding: 12px 8px; color: #666; }
+.variant-status { display: inline-block; padding: 4px 8px; border-radius: 4px; white-space: nowrap; }
+.variant-status.selling { background: #e9f5ed; color: #226538; }
+.variant-status.stopped { background: #f2f2f2; color: #555; }
+.variant-fieldset button:disabled, .variant-picker button:disabled { opacity: .5; cursor: not-allowed; }
