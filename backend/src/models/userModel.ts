@@ -1,7 +1,8 @@
 import mongoose, { Schema } from "mongoose";
 import type { UserRole } from "../types/auth.js";
 
-export interface IUser {
+export interface IUser extends Document {
+  _id: mongoose.Types.ObjectId;
   name: string;
   email: string;
   password?: string;
