@@ -31,6 +31,15 @@ const paymentSchema = new Schema<IPayment>(
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } },
 );
-
+// Mỗi đơn hàng chỉ có một yêu cầu BankTransfer.
+paymentSchema.index(
+  { order_id: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      payment_method: "BankTransfer",
+    },
+  },
+);
 const Payment = mongoose.model<IPayment>("Payment", paymentSchema);
 export default Payment;

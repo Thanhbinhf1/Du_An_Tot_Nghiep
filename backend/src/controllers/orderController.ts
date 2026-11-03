@@ -104,8 +104,8 @@ export class OrderController {
         throw new AppError("ID địa chỉ không hợp lệ", 400);
       }
 
-      if (payment_method !== "COD") {
-        throw new AppError("Hiện tại chỉ hỗ trợ thanh toán COD", 400);
+      if (payment_method !== "COD" && payment_method !== "BankTransfer") {
+        throw new AppError("Hiện tại chỉ hỗ trợ COD và BankTransfer", 400);
       }
 
       if (
@@ -256,7 +256,7 @@ export class OrderController {
           receiver_phone: address.receiver_phone,
           shipping_address: shippingAddress,
           shipping_method: "Standard",
-          payment_method: "COD",
+          payment_method,
           payment_status: "pending",
           order_status: "pending",
           note: note?.trim() ?? "",
@@ -290,7 +290,7 @@ export class OrderController {
           order_id: order._id,
           total_amount: totalAmount,
           total_items: orderItems.length,
-          payment_method: "COD",
+          payment_method,
           payment_status: "pending",
           order_status: "pending",
         };
