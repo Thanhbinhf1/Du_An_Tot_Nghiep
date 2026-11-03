@@ -104,8 +104,15 @@ export class OrderController {
         throw new AppError("ID địa chỉ không hợp lệ", 400);
       }
 
-      if (payment_method !== "COD" && payment_method !== "BankTransfer") {
-        throw new AppError("Hiện tại chỉ hỗ trợ COD và BankTransfer", 400);
+      if (
+        payment_method !== "COD" &&
+        payment_method !== "BankTransfer" &&
+        payment_method !== "VNPay"
+      ) {
+        throw new AppError(
+          "Hiện tại chỉ hỗ trợ COD, BankTransfer và VNPay",
+          400,
+        );
       }
 
       if (
@@ -298,7 +305,10 @@ export class OrderController {
 
       return res.status(201).json({
         status: "success",
-        message: "Đặt hàng COD thành công",
+        message:
+          payment_method === "COD"
+            ? "Đặt hàng COD thành công"
+            : "Tạo đơn hàng thành công, đang chờ thanh toán",
         data: result,
       });
     } catch (error) {
