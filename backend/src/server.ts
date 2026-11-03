@@ -21,6 +21,7 @@ import productCommentRoutes from "./routes/productCommentRoutes.js";
 import brandRoutes from "./routes/brandRoutes.js";
 import cartRoutes from "./routes/cartRoutes.js";
 import addressRoutes from "./routes/addressRoutes.js";
+import orderRoutes from "./routes/orderRoutes.js";
 
 import { notFound, errorHandler } from "./middlewares/errorMiddleware.js";
 
@@ -54,6 +55,7 @@ app.use("/api/reviews", productCommentRoutes);
 app.use("/api/brands", brandRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/addresses", addressRoutes);
+app.use("/api/orders", orderRoutes);
 // Error handling middlewares (phải nằm cuối)
 app.use(notFound);
 app.use(errorHandler);
