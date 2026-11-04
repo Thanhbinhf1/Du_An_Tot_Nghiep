@@ -5,6 +5,7 @@ import OrderSummary from "@/components/cart/OrderSummary";
 import ProductCard from "@/components/product/ProductCard";
 import { formatVnd } from "@/data/products";
 import { saveCartItems, useCartItems } from "@/lib/storefront-demo";
+import { useCouponDiscount } from "@/lib/useCouponDiscount";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 
 import "./cart.css";
@@ -16,6 +17,7 @@ export default function CartPage() {
     const product = products.find((candidate) => candidate.id === item.productId);
     return sum + (product?.price ?? 0) * item.quantity;
   }, 0);
+  const coupon = useCouponDiscount(total);
 
   function changeQuantity(productId: string, size: string, color: string | undefined, change: number) {
     const nextItems = cartItems
@@ -62,7 +64,7 @@ export default function CartPage() {
           })}
           <p className="small muted">Đủ điều kiện áp dụng miễn phí vận chuyển theo chính sách cửa hàng.</p>
         </section>
-        <OrderSummary total={total} itemCount={cartItems.reduce((sum, item) => sum + item.quantity, 0)} />
+        <OrderSummary total={total} coupon={coupon} itemCount={cartItems.reduce((sum, item) => sum + item.quantity, 0)} />
       </div>
       )}
       {cartItems.length > 0 && (

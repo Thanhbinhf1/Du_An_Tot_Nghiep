@@ -5,7 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import OrderSummary from "@/components/cart/OrderSummary";
 import { formatVnd } from "@/data/products";
-import { createDemoOrder, saveDemoAddress, useCartItems, useDemoAddress } from "@/lib/storefront-demo";
+import { saveDemoAddress, savePlacedDemoOrder, useCartItems, useDemoAddress, type DemoOrder } from "@/lib/storefront-demo";
+import { authenticatedHeaders, API_BASE_URL, readApiResponse } from "@/lib/api";
+import { useDemoAuth } from "@/lib/demo-auth";
+import { useCouponDiscount } from "@/lib/useCouponDiscount";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 
 import "./checkout.css";
@@ -21,6 +24,7 @@ function CheckoutContent({
   initialAddress: { name?: string; phone?: string; address?: string };
 }) {
   const router = useRouter();
+  const { token } = useDemoAuth();
   const cartItems = useCartItems();
   const { products } = useCatalogProducts();
   const [delivery, setDelivery] = useState<"address" | "pickup">("address");
@@ -28,20 +32,97 @@ function CheckoutContent({
   const [phone, setPhone] = useState(initialAddress.phone ?? "");
   const [address, setAddress] = useState(initialAddress.address ?? "");
   const [store, setStore] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const total = cartItems.reduce((sum, item) => {
     const product = products.find((candidate) => candidate.id === item.productId);
     return sum + (product?.price ?? 0) * item.quantity;
   }, 0);
+  const coupon = useCouponDiscount(total);
+  const discountedTotal = Math.max(0, total - coupon.discountAmount);
 
-  function placeOrder(event: FormEvent<HTMLFormElement>) {
+  async function placeOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (delivery === "address") saveDemoAddress({ name, phone, address });
-    const order = createDemoOrder(
-      products,
-      { name: delivery === "address" ? name : "Nhận tại cửa hàng", phone, address: delivery === "address" ? address : store },
-      delivery === "address" ? "Giao đến địa chỉ" : "Nhận tại cửa hàng",
-    );
-    if (order) router.push(`/order-confirmation?id=${encodeURIComponent(order.id)}`);
+    if (submitting || coupon.loading || coupon.error) return;
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders`, {
+        method: "POST",
+        headers: {
+          ...authenticatedHeaders(token),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          items: cartItems,
+          receiver: {
+            name: delivery === "address" ? name : "Nhận tại cửa hàng",
+            phone,
+            address: delivery === "address" ? address : store,
+          },
+          shipping_method: delivery,
+          coupon_code: coupon.coupon?.code,
+        }),
+      });
+      const created = await readApiResponse<{
+        _id: string;
+        created_at: string;
+        order_status: string;
+        final_amount: number;
+        discount_amount: number;
+        coupon_code: string | null;
+        receiver_name: string;
+        receiver_phone: string;
+        shipping_address: string;
+        shipping_method: string;
+        items: Array<{
+          product_id: string;
+          product_name: string;
+          size: string;
+          color: string;
+          quantity: number;
+          price_at_buy: number;
+        }>;
+      }>(response);
+      const statusLabels: Record<string, DemoOrder["status"]> = {
+        pending: "Chờ xác nhận",
+        processing: "Đang xử lý",
+        shipping: "Đang giao",
+        completed: "Đã giao",
+        cancelled: "Đã hủy",
+      };
+      const order: DemoOrder = {
+        id: created._id,
+        createdAt: created.created_at,
+        status: statusLabels[created.order_status] ?? "Chờ xác nhận",
+        items: created.items.map((item) => ({
+          productId: item.product_id,
+          productName: item.product_name,
+          size: item.size,
+          color: item.color,
+          quantity: item.quantity,
+          priceAtBuy: item.price_at_buy,
+        })),
+        total: created.final_amount,
+        ...(created.discount_amount > 0 ? {
+          couponCode: created.coupon_code ?? undefined,
+          discountAmount: created.discount_amount,
+        } : {}),
+        address: {
+          name: created.receiver_name,
+          phone: created.receiver_phone,
+          address: created.shipping_address,
+        },
+        delivery: created.shipping_method,
+      };
+      if (delivery === "address") saveDemoAddress({ name, phone, address });
+      savePlacedDemoOrder(order);
+      router.push(`/order-confirmation?id=${encodeURIComponent(order.id)}`);
+    } catch (cause) {
+      setSubmitError(cause instanceof Error ? cause.message : "Không thể tạo đơn hàng. Vui lòng thử lại.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (!cartItems.length) {
@@ -84,11 +165,12 @@ function CheckoutContent({
           )}
           <h2 className="section-title">2. Phương thức thanh toán</h2>
           <div className="panel"><label><input type="radio" name="payment" defaultChecked /> Thanh toán khi nhận hàng (COD)</label></div>
-          <p className="small muted">Đây là đơn hàng minh họa; chưa gửi yêu cầu tới hệ thống thanh toán.</p>
-          <button className="pill-button dark place-order-button" type="submit">Đặt hàng · {formatVnd(total)}</button>
+          <p className="small muted">Đơn hàng sẽ được lưu vào hệ thống. Thanh toán COD đang ở chế độ demo.</p>
+          {submitError && <p className="form-error" role="alert">{submitError}</p>}
+          <button className="pill-button dark place-order-button" type="submit" disabled={submitting || coupon.loading || Boolean(coupon.error)}>{submitting ? "Đang tạo đơn..." : coupon.loading ? "Đang kiểm tra mã giảm giá..." : `Đặt hàng · ${formatVnd(discountedTotal)}`}</button>
         </form>
         <aside>
-          <OrderSummary total={total} checkout itemCount={cartItems.reduce((sum, item) => sum + item.quantity, 0)} />
+          <OrderSummary total={total} coupon={coupon} checkout itemCount={cartItems.reduce((sum, item) => sum + item.quantity, 0)} />
           <div className="checkout-items">
             <h2>Sản phẩm trong đơn hàng</h2>
             {cartItems.map((item) => {

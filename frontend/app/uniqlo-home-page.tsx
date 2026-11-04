@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { productCategories } from "@/data/categories";
 import { API_BASE_URL, readApiResponse, type ApiCategory } from "@/lib/api";
+import { toggleWishlist, useWishlistIds } from "@/lib/storefront-demo";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 import "./home.css";
 import "./home-categories.css";
@@ -29,6 +30,7 @@ const categoryImages: Record<string, string> = {
 const categoryOrder = ["nam", "nu", "tre-em", "em-be"];
 export default function HomePage(){
   const { products, error: productError } = useCatalogProducts();
+  const wishlistIds = useWishlistIds();
   const [categories, setCategories] = useState<Array<Pick<ApiCategory, "name" | "slug">>>(
     productCategories.map(({ name, slug }) => ({ name, slug })),
   );
@@ -90,7 +92,7 @@ export default function HomePage(){
     </div>
     <Link className="category-more" href="/products">XEM TẤT CẢ DANH MỤC SẢN PHẨM</Link>
   </section>
-  {campaigns.map((c,i)=><section className={'campaign-block campaign-'+i} key={c.tag}><Link href="/products" className="campaign-banner"><img src={c.image} alt={c.title}/><div className="campaign-copy"><span>{c.tag}</span><h2>{c.title}</h2><p>{c.subtitle}</p><b>KHÁM PHÁ THÊM　→</b></div></Link>{i===0||i===1?<div className="home-products"><div className="section-heading"><h2>{i===0?"Được yêu thích":"Sản phẩm nổi bật"}</h2><Link href="/products">Xem tất cả →</Link></div><div className="home-product-grid">{products.slice(i, i+4).map((x)=><Link className="home-product" href={`/product/${x.id}`} key={x.id}><img src={x.image} alt={x.name}/><div className="home-product-meta">{x.color} · XS–XL</div><h3>{x.name}</h3><strong>{new Intl.NumberFormat("vi-VN").format(x.price)} VND</strong><div className="home-rating">★ {x.rating} <span>(99+)</span></div></Link>)}</div></div>:null}</section>)}
+  {campaigns.map((c,i)=><section className={'campaign-block campaign-'+i} key={c.tag}><Link href="/products" className="campaign-banner"><img src={c.image} alt={c.title}/><div className="campaign-copy"><span>{c.tag}</span><h2>{c.title}</h2><p>{c.subtitle}</p><b>KHÁM PHÁ THÊM　→</b></div></Link>{i===0||i===1?<div className="home-products"><div className="section-heading"><h2>{i===0?"Được yêu thích":"Sản phẩm nổi bật"}</h2><Link href="/products">Xem tất cả →</Link></div><div className="home-product-grid">{products.slice(i, i+4).map((x)=>{const isFavorite = wishlistIds.includes(x.id); return <article className="home-product" key={x.id}><div className="home-product-image"><Link href={`/product/${x.id}`} tabIndex={-1} aria-hidden="true"><img src={x.image} alt=""/></Link></div><div className="card-actions"><span className="product-meta">{x.color} · XS–XL</span><button className={`heart${isFavorite ? " active" : ""}`} type="button" onClick={() => toggleWishlist(x.id)} aria-label={isFavorite ? `Bỏ ${x.name} khỏi yêu thích` : `Thêm ${x.name} vào yêu thích`} aria-pressed={isFavorite}>{isFavorite ? "♥" : "♡"}</button></div><Link className="home-product-info" href={`/product/${x.id}`}><h3>{x.name}</h3><strong>{new Intl.NumberFormat("vi-VN").format(x.price)} VND</strong><div className="home-rating">★ {x.rating} <span>(99+)</span></div></Link></article>})}</div></div>:null}</section>)}
   <section className="lifewear-panel"><div><span>UNIQLO SPECIAL</span><h2>LifeWear Week</h2><p>Những món đồ thiết yếu để hoàn thiện phong cách của bạn.</p><Link className="hero-button" href="/products">MUA SẮM NGAY</Link></div><img src="https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1200&q=85" alt="LifeWear Week"/></section>
 </div>
 }

@@ -27,6 +27,16 @@ type AdminOrder = {
   created_at: string;
   items: Array<{ product_name: string; sku: string; size: string; color: string; quantity: number }>;
 };
+type AdminAccount = {
+  _id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: "customer" | "staff" | "admin";
+  is_blocked: boolean;
+  auth_provider: "local" | "google";
+  createdAt?: string;
+};
 type Coupon = {
   _id: string;
   code: string;
@@ -65,6 +75,7 @@ const adminSections = [
   { id: "variants", label: "Biến thể sản phẩm", icon: "▦" },
   { id: "products", label: "Sản phẩm", icon: "▦" },
   { id: "categories", label: "Danh mục", icon: "◇" },
+  { id: "accounts", label: "Tài khoản", icon: "♙" },
   { id: "orders", label: "Đơn hàng", icon: "▤" },
   { id: "coupons", label: "Mã giảm giá", icon: "%" },
 ] as const;
@@ -77,7 +88,10 @@ export default function AdminPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<StoredProduct[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [accounts, setAccounts] = useState<AdminAccount[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [accountSearch, setAccountSearch] = useState("");
+  const [updatingAccount, setUpdatingAccount] = useState<string | null>(null);
   const [productForm, setProductForm] = useState(blankProduct);
   const [categoryForm, setCategoryForm] = useState({ name: "", description: "" });
   const [couponForm, setCouponForm] = useState(blankCoupon);
@@ -129,17 +143,19 @@ export default function AdminPage() {
     let active = true;
     const loadData = async () => {
       try {
-        const [categoryData, productData, orderData, couponData] = await Promise.all([
+        const [categoryData, productData, orderData, couponData, accountData] = await Promise.all([
           fetch(`${API_BASE_URL}/catalog/categories`).then(readApiResponse<Category[]>),
           fetch(`${API_BASE_URL}/catalog/products`).then(readApiResponse<StoredProduct[]>),
           adminRequest<AdminOrder[]>("/admin/orders"),
           adminRequest<Coupon[]>("/admin/coupons"),
+          adminRequest<AdminAccount[]>("/admin/users"),
         ]);
         if (active) {
           setCategories(categoryData);
           setProducts(productData);
           setOrders(orderData);
           setCoupons(couponData);
+          setAccounts(accountData);
           setError("");
         }
       } catch (cause) {
@@ -151,16 +167,27 @@ export default function AdminPage() {
   }, [adminRequest, role, token, verified]);
 
   async function refreshData() {
-    const [categoryData, productData, orderData, couponData] = await Promise.all([
+    const [categoryData, productData, orderData, couponData, accountData] = await Promise.all([
       fetch(`${API_BASE_URL}/catalog/categories`).then(readApiResponse<Category[]>),
       fetch(`${API_BASE_URL}/catalog/products`).then(readApiResponse<StoredProduct[]>),
       adminRequest<AdminOrder[]>("/admin/orders"),
       adminRequest<Coupon[]>("/admin/coupons"),
+      adminRequest<AdminAccount[]>("/admin/users"),
     ]);
     setCategories(categoryData);
     setProducts(productData);
     setOrders(orderData);
     setCoupons(couponData);
+    setAccounts(accountData);
+  }
+
+  async function reloadAdminData() {
+    setError("");
+    try {
+      await refreshData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Không thể tải lại dữ liệu quản trị.");
+    }
   }
 
   async function saveCoupon(event: FormEvent<HTMLFormElement>) {
@@ -203,6 +230,27 @@ export default function AdminPage() {
       await refreshData();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Không thể cập nhật đơn hàng.");
+    }
+  }
+
+  async function updateAccountStatus(account: AdminAccount) {
+    const isBlocked = !account.is_blocked;
+    const action = isBlocked ? "khóa" : "mở khóa";
+    if (!window.confirm(`Bạn có chắc muốn ${action} tài khoản ${account.email}?`)) return;
+    setError("");
+    setSuccess("");
+    setUpdatingAccount(account._id);
+    try {
+      await adminRequest(`/admin/users/${account._id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_blocked: isBlocked }),
+      });
+      setSuccess(`Đã ${action} tài khoản ${account.email}.`);
+      await refreshData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : `Không thể ${action} tài khoản.`);
+    } finally {
+      setUpdatingAccount(null);
     }
   }
 
@@ -334,6 +382,16 @@ export default function AdminPage() {
     completed: "Hoàn thành",
     cancelled: "Đã hủy",
   };
+  const filteredAccounts = accounts.filter((account) => {
+    const query = accountSearch.trim().toLocaleLowerCase();
+    return !query || [account.name, account.email, account.phone ?? ""]
+      .some((value) => value.toLocaleLowerCase().includes(query));
+  });
+  const accountRoleLabels: Record<AdminAccount["role"], string> = {
+    customer: "Khách hàng",
+    staff: "Nhân viên",
+    admin: "Quản trị",
+  };
 
   return (
     <section className="admin-shell">
@@ -347,7 +405,7 @@ export default function AdminPage() {
           {adminSections.map((item) => (
             <button key={item.id} type="button" className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)}>
               <span className="admin-nav-icon">{item.icon}</span>{item.label}
-              {item.id !== "variants" && <span className="admin-nav-count">{item.id === "products" ? products.length : item.id === "categories" ? categories.length : item.id === "orders" ? orders.length : coupons.length}</span>}
+              {item.id !== "variants" && <span className="admin-nav-count">{item.id === "products" ? products.length : item.id === "categories" ? categories.length : item.id === "orders" ? orders.length : item.id === "coupons" ? coupons.length : accounts.length}</span>}
             </button>
           ))}
         </nav>
@@ -419,7 +477,7 @@ export default function AdminPage() {
             </div>
           </>}
 
-          {section === "orders" && <div className="admin-panel"><div className="admin-panel-heading"><div><h2>Quản lý đơn hàng</h2><p>Theo dõi khách mua, giá trị và cập nhật tiến độ đơn.</p></div><span>{orders.length} đơn</span></div>
+          {section === "orders" && <div className="admin-panel"><div className="admin-panel-heading"><div><h2>Quản lý đơn hàng</h2><p>Theo dõi khách mua, giá trị và cập nhật tiến độ đơn.</p></div><div className="admin-order-heading-actions"><span>{orders.length} đơn</span><button type="button" onClick={() => void reloadAdminData()}>Tải lại</button></div></div>
             <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Mã đơn / ngày tạo</th><th>Khách hàng</th><th>Sản phẩm</th><th>Thanh toán</th><th>Tổng tiền</th><th>Trạng thái</th></tr></thead>
               <tbody>{orders.map((order) => <tr key={order._id}><td><strong>#{order._id.slice(-8).toUpperCase()}</strong><br /><small>{new Date(order.created_at).toLocaleString("vi-VN")}</small></td>
                 <td><strong>{order.receiver_name}</strong><br /><small>{order.user_id?.email ?? order.receiver_phone}</small></td>
@@ -428,6 +486,29 @@ export default function AdminPage() {
                 <td><select className="admin-status-select" aria-label={`Trạng thái đơn ${order._id}`} value={order.order_status} onChange={(event) => void updateOrderStatus(order._id, event.target.value as AdminOrder["order_status"])}>
                   {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td></tr>)}
                 {!orders.length && <tr><td className="admin-empty" colSpan={6}>Chưa có đơn hàng nào được lưu trên hệ thống.</td></tr>}</tbody>
+            </table></div>
+          </div>}
+
+          {section === "accounts" && <div className="admin-panel">
+            <div className="admin-panel-heading">
+              <div><h2>Quản lý tài khoản</h2><p>Xem tài khoản đã đăng ký và khóa hoặc mở khóa quyền truy cập.</p></div>
+              <span>{accounts.length} tài khoản</span>
+            </div>
+            <label className="admin-account-search">Tìm theo tên, email hoặc số điện thoại
+              <input type="search" value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder="Nhập thông tin tài khoản..." />
+            </label>
+            <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Tài khoản</th><th>Số điện thoại</th><th>Loại tài khoản</th><th>Đăng ký</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+              <tbody>{filteredAccounts.map((account) => <tr key={account._id}>
+                <td><strong>{account.name}</strong><br /><small>{account.email}</small></td>
+                <td>{account.phone || "—"}</td>
+                <td>{accountRoleLabels[account.role]}{account.auth_provider === "google" ? <><br /><small>Google</small></> : null}</td>
+                <td>{account.createdAt ? new Date(account.createdAt).toLocaleDateString("vi-VN") : "—"}</td>
+                <td><span className={`admin-account-state ${account.is_blocked ? "blocked" : "active"}`}>{account.is_blocked ? "Đã khóa" : "Đang hoạt động"}</span></td>
+                <td>{account.role === "admin"
+                  ? <span className="admin-muted">Không thể khóa admin</span>
+                  : <div className="admin-actions"><button className={account.is_blocked ? "" : "danger"} disabled={updatingAccount === account._id} onClick={() => void updateAccountStatus(account)}>{updatingAccount === account._id ? "Đang cập nhật..." : account.is_blocked ? "Mở khóa" : "Khóa tài khoản"}</button></div>}</td>
+              </tr>)}
+              {!filteredAccounts.length && <tr><td className="admin-empty" colSpan={6}>{accounts.length ? "Không tìm thấy tài khoản phù hợp." : "Chưa có tài khoản nào."}</td></tr>}</tbody>
             </table></div>
           </div>}
 

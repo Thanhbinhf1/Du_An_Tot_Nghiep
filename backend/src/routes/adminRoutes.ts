@@ -49,6 +49,8 @@ router.use(protect, requireAdmin);
 router.get("/session", (req, res) => {
   res.json({ status: "success", data: { role: "admin" } });
 });
+router.get("/users", AdminController.getUsers);
+router.patch("/users/:id/status", AdminController.updateUserStatus);
 router.get("/orders", AdminController.getOrders);
 router.patch("/orders/:id/status", AdminController.updateOrderStatus);
 router.get("/coupons", AdminController.getCoupons);

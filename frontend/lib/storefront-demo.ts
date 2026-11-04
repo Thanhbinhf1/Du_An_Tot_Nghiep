@@ -1,7 +1,6 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import type { Product } from "@/types/product";
 import {
   getCurrentDemoAccountStorageKey,
   getDemoAccountStorageKey,
@@ -18,9 +17,11 @@ export type DeliveryAddress = {
 export type DemoOrder = {
   id: string;
   createdAt: string;
-  status: "Đang xử lý" | "Đang giao" | "Đã giao";
-  items: CartItem[];
+  status: "Chờ xác nhận" | "Đang xử lý" | "Đang giao" | "Đã giao" | "Đã hủy";
+  items: Array<CartItem & { productName?: string; priceAtBuy?: number }>;
   total: number;
+  couponCode?: string;
+  discountAmount?: number;
   address: DeliveryAddress;
   delivery: string;
 };
@@ -155,29 +156,31 @@ export function useDemoProfileName() {
   );
 }
 
-export function createDemoOrder(
-  products: Product[],
-  address: DeliveryAddress,
-  delivery: string,
-) {
-  const items = readCartItems();
-  if (!items.length) return null;
-  const total = items.reduce((sum, item) => {
-    const product = products.find((candidate) => candidate.id === item.productId);
-    return sum + (product?.price ?? 0) * item.quantity;
-  }, 0);
-  const orders = JSON.parse(readStorage("bapd-orders")) as DemoOrder[];
-  const order: DemoOrder = {
-    id: `BAPD-${Date.now().toString().slice(-8)}`,
-    createdAt: new Date().toISOString(),
-    status: "Đang xử lý",
-    items,
-    total,
-    address,
-    delivery,
-  };
-  localStorage.setItem(getCurrentDemoAccountStorageKey("bapd-orders"), JSON.stringify([order, ...orders]));
-  localStorage.setItem(getCurrentDemoAccountStorageKey("bapd-cart"), emptyArray);
+export function useAppliedCouponCode() {
+  const { account } = useDemoAuth();
+  return useSyncExternalStore(
+    subscribe,
+    () => typeof window === "undefined"
+      ? ""
+      : localStorage.getItem(getDemoAccountStorageKey(account, "bapd-coupon-code")) ?? "",
+    () => "",
+  );
+}
+
+export function saveAppliedCouponCode(code: string) {
+  const key = getCurrentDemoAccountStorageKey("bapd-coupon-code");
+  if (code) localStorage.setItem(key, code);
+  else localStorage.removeItem(key);
   notify();
-  return order;
+}
+
+export function savePlacedDemoOrder(order: DemoOrder) {
+  const orders = JSON.parse(readStorage("bapd-orders")) as DemoOrder[];
+  localStorage.setItem(getCurrentDemoAccountStorageKey("bapd-orders"), JSON.stringify([
+    order,
+    ...orders.filter((existing) => existing.id !== order.id),
+  ]));
+  localStorage.setItem(getCurrentDemoAccountStorageKey("bapd-cart"), emptyArray);
+  localStorage.removeItem(getCurrentDemoAccountStorageKey("bapd-coupon-code"));
+  notify();
 }

@@ -8,3 +8,49 @@
   max-width: 100vw;
   margin-left: calc(50% - 50vw);
 }
+
+.home-product-image {
+  position: relative;
+}
+
+.home-product-image > a {
+  display: block;
+}
+
+.home-product-image img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  background: #f3f3f3;
+}
+
+.home-product .card-actions {
+  min-height: 36px;
+  align-items: center;
+  padding-top: 6px;
+}
+
+.home-product .home-product-meta {
+  margin: 0;
+}
+
+.home-product .heart {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.home-product-info {
+  display: block;
+}
+
+.home-product-info:focus-visible {
+  outline: 2px solid #222;
+  outline-offset: 3px;
+}
