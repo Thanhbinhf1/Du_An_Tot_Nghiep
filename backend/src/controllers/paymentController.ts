@@ -15,6 +15,10 @@ import type { AuthRequest } from "../middlewares/authMiddleware.js";
 import { queryVNPayTransaction } from "../services/vnpayQueryService.js";
 import { confirmVNPaySuccess } from "../services/vnpaySettlementService.js";
 import { applyVerifiedVNPayFailure } from "../services/vnpayFailureService.js";
+import {
+  createMoMoPayment,
+  verifyMoMoIPNSignature,
+} from "../services/momoService.js";
 
 function getValidId(
   value: string | string[] | undefined,
@@ -793,6 +797,340 @@ export class PaymentController {
           outcome,
         },
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async createMoMoPayment(
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      if (!req.user) {
+        throw new AppError("Bạn chưa đăng nhập", 401);
+      }
+
+      const orderId = getValidId(req.body?.order_id, "ID đơn hàng");
+
+      // 1. Kiểm tra đơn thuộc người đang đăng nhập
+      const order = await Order.findOne({
+        _id: orderId,
+        user_id: req.user._id,
+        payment_method: "MoMo",
+      });
+
+      if (!order) {
+        throw new AppError("Không tìm thấy đơn hàng MoMo", 404);
+      }
+
+      // 2. Chỉ thanh toán đơn đang chờ
+      if (
+        order.payment_status !== "pending" ||
+        order.order_status !== "pending"
+      ) {
+        throw new AppError("Đơn hàng không còn chờ thanh toán", 409);
+      }
+
+      // 3. Kiểm tra số tiền lấy từ database
+      const amount = order.final_amount;
+
+      if (
+        !Number.isSafeInteger(amount) ||
+        amount < 1000 ||
+        amount > 50_000_000
+      ) {
+        throw new AppError("Số tiền không hợp lệ cho MoMo", 400);
+      }
+
+      const momoOrderId = String(order._id);
+
+      // 4. Không tạo trùng Payment
+      const existing = await Payment.findOne({
+        order_id: order._id,
+        payment_method: "MoMo",
+      });
+
+      if (existing) {
+        if (existing.status === "pending" && existing.payment_url) {
+          return res.status(200).json({
+            status: "success",
+            message: "Yêu cầu thanh toán MoMo đã tồn tại",
+            data: {
+              payment_id: existing._id,
+              order_id: order._id,
+              payment_url: existing.payment_url,
+              reused: true,
+            },
+          });
+        }
+
+        throw new AppError(
+          "Yêu cầu MoMo đã tồn tại nhưng chưa hoàn tất. Cần đối soát trước khi thử lại",
+          409,
+        );
+      }
+
+      // 5. Đặt trước bản ghi Payment để chống tạo trùng
+      const payment = await Payment.create({
+        order_id: order._id,
+        payment_method: "MoMo",
+        transaction_id: momoOrderId,
+        status: "pending",
+        payment_url: "",
+      });
+
+      // 6. Gọi API MoMo Sandbox
+      // Không gửi số tiền lấy trực tiếp từ req.body
+      const momo = await createMoMoPayment({
+        orderId: momoOrderId,
+        amount,
+        orderInfo: `Thanh toan FStyle ${momoOrderId}`,
+      });
+
+      // 7. Lưu URL MoMo trả về
+      const updatedPayment = await Payment.findOneAndUpdate(
+        {
+          _id: payment._id,
+          payment_method: "MoMo",
+          status: "pending",
+          payment_url: "",
+        },
+        {
+          $set: {
+            payment_url: momo.payment_url,
+          },
+        },
+        {
+          returnDocument: "after",
+          runValidators: true,
+        },
+      );
+
+      if (!updatedPayment) {
+        throw new AppError(
+          "Trạng thái thanh toán đã thay đổi, cần đối soát",
+          409,
+        );
+      }
+
+      return res.status(200).json({
+        status: "success",
+        message: "Đã tạo URL thanh toán MoMo",
+        data: {
+          payment_id: updatedPayment._id,
+          order_id: order._id,
+          payment_url: updatedPayment.payment_url,
+          reused: false,
+        },
+      });
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === 11000
+      ) {
+        return next(
+          new AppError("Yêu cầu MoMo đã tồn tại, vui lòng tải lại", 409),
+        );
+      }
+
+      next(error);
+    }
+  }
+
+  static async momoIPN(req: AuthRequest, res: Response) {
+    try {
+      // 1. Xác minh chữ ký từ MoMo
+      if (!verifyMoMoIPNSignature(req.body)) {
+        return res.status(400).json({
+          message: "Invalid MoMo signature or payload",
+        });
+      }
+
+      const data = req.body;
+
+      // 2. Kiểm tra mã đơn và mã yêu cầu
+      if (
+        !mongoose.isValidObjectId(data.orderId) ||
+        data.requestId !== data.orderId ||
+        data.extraData !== "" ||
+        data.orderInfo !== `Thanh toan FStyle ${data.orderId}`
+      ) {
+        return res.status(400).json({
+          message: "Invalid MoMo payment reference",
+        });
+      }
+
+      // 3. Chỉ xử lý thanh toán thành công.
+      // 9000 là trạng thái được cấp quyền, chưa phải
+      // giao dịch hoàn tất.
+      if (data.resultCode !== 0) {
+        console.warn("MoMo payment requires reconciliation", {
+          orderId: data.orderId,
+          resultCode: data.resultCode,
+        });
+
+        // Chưa xử lý dứt điểm giao dịch thất bại.
+        // Không xác nhận đã xử lý callback.
+        return res.status(503).json({
+          message: "Payment reconciliation required",
+        });
+      }
+
+      if (data.amount <= 0 || data.transId <= 0) {
+        return res.status(400).json({
+          message: "Invalid MoMo transaction",
+        });
+      }
+
+      // 4. Cập nhật Order và Payment trong transaction
+      const outcome = await mongoose.connection.transaction(async (session) => {
+        const payment = await Payment.findOne({
+          payment_method: "MoMo",
+          transaction_id: data.orderId,
+        }).session(session);
+
+        if (!payment) {
+          return "not_found";
+        }
+
+        const order = await Order.findById(payment.order_id).session(session);
+
+        if (
+          !order ||
+          order.payment_method !== "MoMo" ||
+          String(order._id) !== data.orderId ||
+          !Number.isSafeInteger(order.final_amount) ||
+          order.final_amount !== data.amount
+        ) {
+          return "mismatch";
+        }
+
+        const momoTransId = String(data.transId);
+
+        // Callback được gửi lại sau khi đã thành công
+        if (
+          payment.status === "success" &&
+          order.payment_status === "success" &&
+          order.transaction_id === momoTransId
+        ) {
+          return "already_confirmed";
+        }
+
+        if (
+          payment.status !== "pending" ||
+          order.payment_status !== "pending" ||
+          order.order_status !== "pending"
+        ) {
+          return "conflict";
+        }
+
+        // 5. Cập nhật đơn có điều kiện
+        const updatedOrder = await Order.findOneAndUpdate(
+          {
+            _id: order._id,
+            payment_method: "MoMo",
+            payment_status: "pending",
+            order_status: "pending",
+          },
+          {
+            $set: {
+              payment_status: "success",
+              transaction_id: momoTransId,
+            },
+          },
+          {
+            session,
+            returnDocument: "after",
+            runValidators: true,
+          },
+        );
+
+        if (!updatedOrder) {
+          throw new Error("Order state conflict");
+        }
+
+        // 6. Cập nhật Payment có điều kiện
+        const updatedPayment = await Payment.findOneAndUpdate(
+          {
+            _id: payment._id,
+            payment_method: "MoMo",
+            status: "pending",
+          },
+          {
+            $set: {
+              status: "success",
+              paid_at: new Date(),
+            },
+          },
+          {
+            session,
+            returnDocument: "after",
+            runValidators: true,
+          },
+        );
+
+        if (!updatedPayment) {
+          throw new Error("Payment state conflict");
+        }
+
+        return "confirmed";
+      });
+
+      if (outcome === "confirmed" || outcome === "already_confirmed") {
+        return res.status(204).send();
+      }
+
+      console.warn("MoMo IPN state conflict", {
+        orderId: data.orderId,
+        outcome,
+      });
+
+      return res.status(409).json({
+        message: "Payment needs reconciliation",
+      });
+    } catch (error) {
+      console.error("MoMo IPN processing error:", error);
+
+      return res.status(503).json({
+        message: "Temporary processing error",
+      });
+    }
+  }
+
+  static async momoReturn(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const resultPage = process.env.MOMO_RESULT_PAGE_URL;
+
+      if (!resultPage) {
+        throw new AppError("Chưa cấu hình trang kết quả MoMo", 500);
+      }
+
+      const url = new URL(resultPage);
+
+      if (
+        !["http:", "https:"].includes(url.protocol) ||
+        url.username ||
+        url.password
+      ) {
+        throw new AppError("URL trang kết quả không hợp lệ", 500);
+      }
+
+      const rawOrderId = req.query.orderId;
+
+      // Chỉ chuyển mã đơn có định dạng ObjectId hợp lệ.
+      // Không dùng resultCode để xác nhận thanh toán.
+      if (
+        typeof rawOrderId === "string" &&
+        /^[a-fA-F0-9]{24}$/.test(rawOrderId)
+      ) {
+        url.searchParams.set("orderId", rawOrderId);
+      }
+
+      return res.redirect(303, url.toString());
     } catch (error) {
       next(error);
     }

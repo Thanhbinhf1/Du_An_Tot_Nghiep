@@ -4,25 +4,28 @@ import { PaymentController } from "../controllers/paymentController.js";
 
 const router = Router();
 
-// VNPay gọi callback không sử dụng JWT.
+// Public callbacks: không yêu cầu JWT
 router.get("/vnpay/return", PaymentController.vnpayReturn);
 router.get("/vnpay/ipn", PaymentController.vnpayIPN);
+router.post("/momo/ipn", PaymentController.momoIPN);
+router.get("/momo/return", PaymentController.momoReturn);
 
-// Các API dưới đây yêu cầu đăng nhập.
+// Các API bên dưới yêu cầu đăng nhập
 router.use(protect);
 
-// BankTransfer
+// MoMo
+router.post("/momo/create", PaymentController.createMoMoPayment);
+
+// Bank Transfer
 router.post("/bank-transfer", PaymentController.createBankTransfer);
-
-router.get("/order/:orderId", PaymentController.getPaymentByOrder);
-
 router.patch("/:id/confirm", PaymentController.confirmBankTransfer);
+
+// Tra cứu thanh toán theo đơn hàng
+router.get("/order/:orderId", PaymentController.getPaymentByOrder);
 
 // VNPay
 router.post("/vnpay/create", PaymentController.createVNPayPayment);
-
 router.post("/vnpay/:id/reconcile", PaymentController.reconcileVNPayPayment);
-
 router.post(
   "/vnpay/:id/resolve-failure",
   PaymentController.resolveVNPayFailure,

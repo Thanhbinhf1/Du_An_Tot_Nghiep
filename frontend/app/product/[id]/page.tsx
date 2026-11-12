@@ -6,9 +6,18 @@ import { useParams } from "next/navigation";
 import ProductCard from "@/components/product/ProductCard";
 import ProductReviews from "@/components/product/ProductReviews";
 import { formatVnd, products as sampleProducts } from "@/data/products";
-import { addCartItem, toggleWishlist, useWishlistIds } from "@/lib/storefront-demo";
+import { toggleWishlist, useWishlistIds } from "@/lib/storefront-demo";
+import {
+  addCartItem as addBackendCartItem,
+  getProductVariants,
+} from "@/lib/cart-api";
 import { useDemoAuth } from "@/lib/demo-auth";
-import { API_BASE_URL, mapApiProduct, readApiResponse, type ApiProduct } from "@/lib/api";
+import {
+  API_BASE_URL,
+  mapApiProduct,
+  readApiResponse,
+  type ApiProduct,
+} from "@/lib/api";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 import type { Product } from "@/types/product";
 
@@ -22,19 +31,82 @@ export default function ProductDetailPage() {
   const [size, setSize] = useState(localProduct?.sizes[0] ?? "");
   const [color, setColor] = useState(localProduct?.color ?? "");
   const [quantity, setQuantity] = useState(1);
-  const [variantImage, setVariantImage] = useState<{ key: string; src: string } | null>(null);
-  const [imageError, setImageError] = useState<{ key: string; message: string } | null>(null);
+  const [variantImage, setVariantImage] = useState<{
+    key: string;
+    src: string;
+  } | null>(null);
+  const [imageError, setImageError] = useState<{
+    key: string;
+    message: string;
+  } | null>(null);
   const [added, setAdded] = useState(false);
+  const [addingToCart, setAddingToCart] = useState(false);
+  const [cartError, setCartError] = useState("");
   const wishlistIds = useWishlistIds();
-  const { isLoggedIn } = useDemoAuth();
+  const { isLoggedIn, token } = useDemoAuth();
   const { products } = useCatalogProducts();
   const product = apiProduct ?? localProduct;
   const variantKey = product ? `${product.id}:${product.image}:${color}` : "";
 
+  async function handleAddToCart() {
+    if (!product || !token || addingToCart) return;
+
+    setAdded(false);
+    setCartError("");
+    setAddingToCart(true);
+
+    try {
+      // Chỉ nhận ID sản phẩm MongoDB thật.
+      if (!/^[a-f\d]{24}$/i.test(product.id)) {
+        throw new Error("Đây là sản phẩm mẫu, chưa có dữ liệu trong MongoDB.");
+      }
+
+      // Lấy các biến thể được phép bán từ Backend.
+      const variants = await getProductVariants(product.id);
+
+      // Tìm đúng biến thể khách đã chọn.
+      const selectedVariant = variants.find(
+        (variant) =>
+          variant.size.trim().toLowerCase() === size.trim().toLowerCase() &&
+          variant.color.trim().toLowerCase() === color.trim().toLowerCase() &&
+          variant.status,
+      );
+
+      if (!selectedVariant) {
+        throw new Error(
+          "Không tìm thấy biến thể phù hợp với size và màu đã chọn.",
+        );
+      }
+
+      if (selectedVariant.stock_quantity < quantity) {
+        throw new Error(
+          `Sản phẩm chỉ còn ${selectedVariant.stock_quantity} trong kho.`,
+        );
+      }
+
+      // Lưu vào MongoDB bằng JWT thật.
+      await addBackendCartItem(selectedVariant._id, quantity, token);
+
+      setAdded(true);
+    } catch (error) {
+      setCartError(
+        error instanceof Error
+          ? error.message
+          : "Không thể thêm sản phẩm vào giỏ hàng.",
+      );
+    } finally {
+      setAddingToCart(false);
+    }
+  }
+
   useEffect(() => {
     if (!product) return;
 
-    if (product.code !== "458824" || !product.image.endsWith("/jacket-sage.jpg") || color === "55 GREEN") {
+    if (
+      product.code !== "458824" ||
+      !product.image.endsWith("/jacket-sage.jpg") ||
+      color === "55 GREEN"
+    ) {
       return;
     }
 
@@ -48,7 +120,12 @@ export default function ProductDetailPage() {
         if (!context) throw new Error("Trình duyệt không hỗ trợ xử lý ảnh.");
 
         context.drawImage(sourceImage, 0, 0);
-        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const imageData = context.getImageData(
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        );
 
         for (let index = 0; index < imageData.data.length; index += 4) {
           const red = imageData.data[index];
@@ -70,25 +147,37 @@ export default function ProductDetailPage() {
           if (hue < 35 || hue > 165 || saturation < 0.035) continue;
 
           const mask = Math.min(1, (saturation - 0.035) / 0.065);
-          const shade = color === "09 BLACK"
-            ? 0.32 + brightness * 0.62
-            : 0.72 + brightness * 0.28;
+          const shade =
+            color === "09 BLACK"
+              ? 0.32 + brightness * 0.62
+              : 0.72 + brightness * 0.28;
           const target = color === "09 BLACK" ? 24 : 255;
           imageData.data[index] = red * (1 - mask) + target * shade * mask;
-          imageData.data[index + 1] = green * (1 - mask) + target * shade * mask;
+          imageData.data[index + 1] =
+            green * (1 - mask) + target * shade * mask;
           imageData.data[index + 2] = blue * (1 - mask) + target * shade * mask;
         }
 
         context.putImageData(imageData, 0, 0);
-        setVariantImage({ key: variantKey, src: canvas.toDataURL("image/jpeg", 0.92) });
+        setVariantImage({
+          key: variantKey,
+          src: canvas.toDataURL("image/jpeg", 0.92),
+        });
       } catch (error: unknown) {
         setImageError({
           key: variantKey,
-          message: error instanceof Error ? error.message : "Không thể đổi màu ảnh sản phẩm.",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Không thể đổi màu ảnh sản phẩm.",
         });
       }
     };
-    sourceImage.onerror = () => setImageError({ key: variantKey, message: "Không thể tải ảnh sản phẩm để đổi màu." });
+    sourceImage.onerror = () =>
+      setImageError({
+        key: variantKey,
+        message: "Không thể tải ảnh sản phẩm để đổi màu.",
+      });
     sourceImage.src = product.image;
 
     return () => {
@@ -110,13 +199,22 @@ export default function ProductDetailPage() {
         setColor(loadedProduct.color);
       })
       .catch((error: unknown) => {
-        if (active) setProductError(error instanceof Error ? error.message : "Không thể tải sản phẩm.");
+        if (active)
+          setProductError(
+            error instanceof Error ? error.message : "Không thể tải sản phẩm.",
+          );
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [id, localProduct]);
 
   if (!product) {
-    return <div className="empty-state">{productError || "Đang tải sản phẩm..."}</div>;
+    return (
+      <div className="empty-state">
+        {productError || "Đang tải sản phẩm..."}
+      </div>
+    );
   }
   const favorite = wishlistIds.includes(product.id);
 
@@ -125,7 +223,11 @@ export default function ProductDetailPage() {
       <nav className="breadcrumb product-breadcrumb" aria-label="Điều hướng">
         <Link href="/">Trang chủ</Link>
         <span aria-hidden="true">/</span>
-        <Link href={`/products?category=${encodeURIComponent(product.category)}`}>{product.category}</Link>
+        <Link
+          href={`/products?category=${encodeURIComponent(product.category)}`}
+        >
+          {product.category}
+        </Link>
         <span aria-hidden="true">/</span>
         <span aria-current="page">{product.name}</span>
       </nav>
@@ -134,27 +236,48 @@ export default function ProductDetailPage() {
         <div className="product-gallery">
           <img
             className="product-main-image"
-            src={variantImage?.key === variantKey ? variantImage.src : product.image}
+            src={
+              variantImage?.key === variantKey
+                ? variantImage.src
+                : product.image
+            }
             alt={`${product.name} - màu ${color}`}
           />
-          <p className="product-image-caption">{product.name} · {color}</p>
-          {imageError?.key === variantKey && <p className="product-image-error" role="status">{imageError.message}</p>}
+          <p className="product-image-caption">
+            {product.name} · {color}
+          </p>
+          {imageError?.key === variantKey && (
+            <p className="product-image-error" role="status">
+              {imageError.message}
+            </p>
+          )}
         </div>
 
         <section className="product-info" aria-label="Thông tin sản phẩm">
           <p className="product-code">Mã sản phẩm: {product.code}</p>
           <h1 className="product-title">{product.name}</h1>
           <p className="detail-price">{formatVnd(product.price)}</p>
-          <p className="product-rating" aria-label={`Đánh giá ${product.rating} trên 5`}>
+          <p
+            className="product-rating"
+            aria-label={`Đánh giá ${product.rating} trên 5`}
+          >
             <span aria-hidden="true">★</span> {product.rating.toFixed(1)}
             <span className="rating-caption"> · Đánh giá của khách hàng</span>
           </p>
 
           <div className="product-option-group">
-            <p className="product-option-label">Màu sắc: <strong>{color}</strong></p>
-            <div className="product-color-options" role="group" aria-label="Chọn màu sắc">
+            <p className="product-option-label">
+              Màu sắc: <strong>{color}</strong>
+            </p>
+            <div
+              className="product-color-options"
+              role="group"
+              aria-label="Chọn màu sắc"
+            >
               {[product.color, "09 BLACK", "00 WHITE"]
-                .filter((value, index, values) => values.indexOf(value) === index)
+                .filter(
+                  (value, index, values) => values.indexOf(value) === index,
+                )
                 .map((value) => (
                   <button
                     key={value}
@@ -164,7 +287,9 @@ export default function ProductDetailPage() {
                     aria-pressed={color === value}
                     onClick={() => setColor(value)}
                   >
-                    <span className={`color-swatch swatch-${value.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} />
+                    <span
+                      className={`color-swatch swatch-${value.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                    />
                   </button>
                 ))}
             </div>
@@ -172,10 +297,16 @@ export default function ProductDetailPage() {
 
           <div className="product-option-group">
             <div className="size-label-row">
-              <p className="product-option-label">Kích cỡ: <strong>{size || "Chọn kích cỡ"}</strong></p>
+              <p className="product-option-label">
+                Kích cỡ: <strong>{size || "Chọn kích cỡ"}</strong>
+              </p>
               <a href="#size-guide">Hướng dẫn chọn cỡ</a>
             </div>
-            <div className="product-size-options" role="group" aria-label="Chọn kích cỡ">
+            <div
+              className="product-size-options"
+              role="group"
+              aria-label="Chọn kích cỡ"
+            >
               {product.sizes.map((availableSize) => (
                 <button
                   key={availableSize}
@@ -192,12 +323,17 @@ export default function ProductDetailPage() {
 
           <div className="product-quantity-group">
             <p className="product-option-label">Số lượng</p>
-            <div className="product-quantity-control" aria-label="Chọn số lượng sản phẩm">
+            <div
+              className="product-quantity-control"
+              aria-label="Chọn số lượng sản phẩm"
+            >
               <button
                 type="button"
                 aria-label="Giảm số lượng"
                 disabled={quantity <= 1}
-                onClick={() => setQuantity((current) => Math.max(1, current - 1))}
+                onClick={() =>
+                  setQuantity((current) => Math.max(1, current - 1))
+                }
               >
                 −
               </button>
@@ -216,16 +352,19 @@ export default function ProductDetailPage() {
             <button
               className="product-add-button"
               type="button"
-              onClick={() => {
-                if (addCartItem(product.id, size, color, quantity)) setAdded(true);
-              }}
+              disabled={addingToCart || !token}
+              onClick={handleAddToCart}
             >
-              Thêm {quantity > 1 ? `${quantity} sản phẩm vào` : "vào"} giỏ hàng
+              {addingToCart
+                ? "Đang thêm vào giỏ hàng..."
+                : `Thêm ${quantity > 1 ? `${quantity} sản phẩm vào` : "vào"} giỏ hàng`}
             </button>
           ) : (
             <div className="product-login-required" role="status">
               <p>Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng.</p>
-              <Link className="product-add-button" href="/dang-nhap">Đăng nhập</Link>
+              <Link className="product-add-button" href="/dang-nhap">
+                Đăng nhập
+              </Link>
             </div>
           )}
           <button
@@ -239,22 +378,37 @@ export default function ProductDetailPage() {
           </button>
           {added && (
             <p className="product-added-message" role="status">
-              Đã thêm vào giỏ hàng · Size {size}, màu {color}. <Link href="/cart">Xem giỏ hàng</Link>
+              Đã lưu vào giỏ hàng MongoDB · Size {size}, màu {color}.
+            </p>
+          )}
+
+          {cartError && (
+            <p className="product-image-error" role="alert">
+              {cartError}
             </p>
           )}
 
           <div className="product-details-list">
             <details open>
               <summary>Mô tả sản phẩm</summary>
-              <p>{product.name}. Màu sắc: {product.color}. Mã sản phẩm: {product.code}.</p>
+              <p>
+                {product.name}. Màu sắc: {product.color}. Mã sản phẩm:{" "}
+                {product.code}.
+              </p>
             </details>
             <details id="size-guide">
               <summary>Kích cỡ</summary>
-              <p>Các kích cỡ hiện có: {product.sizes.join(", ")}. Vui lòng chọn kích cỡ phù hợp trước khi thêm vào giỏ hàng.</p>
+              <p>
+                Các kích cỡ hiện có: {product.sizes.join(", ")}. Vui lòng chọn
+                kích cỡ phù hợp trước khi thêm vào giỏ hàng.
+              </p>
             </details>
             <details>
               <summary>Giao hàng / Đổi trả</summary>
-              <p>Xem <Link href="/shipping">chính sách giao hàng</Link> và <Link href="/returns">chính sách đổi trả</Link> của cửa hàng.</p>
+              <p>
+                Xem <Link href="/shipping">chính sách giao hàng</Link> và{" "}
+                <Link href="/returns">chính sách đổi trả</Link> của cửa hàng.
+              </p>
             </details>
           </div>
         </section>
@@ -264,7 +418,14 @@ export default function ProductDetailPage() {
 
       <section className="related-products">
         <h2 className="section-title">Sản phẩm bạn có thể quan tâm</h2>
-        <div className="product-grid">{products.filter((item) => item.id !== product.id).slice(0, 6).map((item) => <ProductCard key={item.id} product={item} />)}</div>
+        <div className="product-grid">
+          {products
+            .filter((item) => item.id !== product.id)
+            .slice(0, 6)
+            .map((item) => (
+              <ProductCard key={item.id} product={item} />
+            ))}
+        </div>
       </section>
     </div>
   );
