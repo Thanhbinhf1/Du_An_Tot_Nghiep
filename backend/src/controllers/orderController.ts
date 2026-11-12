@@ -107,12 +107,10 @@ export class OrderController {
       if (
         payment_method !== "COD" &&
         payment_method !== "BankTransfer" &&
-        payment_method !== "VNPay"
+        payment_method !== "VNPay" &&
+        payment_method !== "MoMo"
       ) {
-        throw new AppError(
-          "Hiện tại chỉ hỗ trợ COD, BankTransfer và VNPay",
-          400,
-        );
+        throw new AppError("Phương thức thanh toán không hợp lệ", 400);
       }
 
       if (
