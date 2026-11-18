@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema, Types } from "mongoose";
+import { productGenders } from "../services/catalogAudience.js";
 
 export interface IProduct extends Document {
   category_id: Types.ObjectId;
@@ -6,6 +7,7 @@ export interface IProduct extends Document {
   name: string;
   slug: string;
   description: string;
+  gender?: string;
   is_featured: boolean;
   status: boolean;
   created_at: Date;
@@ -29,6 +31,7 @@ const productSchema = new Schema<IProduct>(
       lowercase: true,
     },
     description: { type: String, default: "" },
+    gender: { type: String, enum: productGenders },
     is_featured: { type: Boolean, default: false },
     status: { type: Boolean, default: true },
   },

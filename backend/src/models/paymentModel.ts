@@ -31,6 +31,40 @@ const paymentSchema = new Schema<IPayment>(
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } },
 );
+// Mỗi đơn hàng chỉ có một yêu cầu BankTransfer.
+// Mỗi đơn hàng chỉ có một Payment
+// cho mỗi phương thức thanh toán.
+paymentSchema.index(
+  { order_id: 1, payment_method: 1 },
+  {
+    unique: true,
+    name: "unique_order_payment_method",
+  },
+);
+paymentSchema.index(
+  { transaction_id: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      payment_method: "VNPay",
+    },
+    name: "unique_vnpay_transaction",
+  },
+);
 
+paymentSchema.index(
+  { order_id: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      payment_method: "VNPay",
+    },
+  },
+);
+paymentSchema.index({ transaction_id: 1 }, {
+  unique: true,
+  partialFilterExpression: { payment_method: "BankTransfer", status: "success", transaction_id: { $gt: "" } },
+  name: "unique_bank_transfer_transaction",
+});
 const Payment = mongoose.model<IPayment>("Payment", paymentSchema);
 export default Payment;

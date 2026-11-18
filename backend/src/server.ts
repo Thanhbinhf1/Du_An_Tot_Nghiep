@@ -19,8 +19,13 @@ import adminRoutes from "./routes/adminRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
 import productCommentRoutes from "./routes/productCommentRoutes.js";
 import couponRoutes from "./routes/couponRoutes.js";
-import orderRoutes from "./routes/orderRoutes.js";
 import brandRoutes from "./routes/brandRoutes.js";
+import cartRoutes from "./routes/cartRoutes.js";
+import addressRoutes from "./routes/addressRoutes.js";
+import orderRoutes from "./routes/orderRoutes.js";
+import paymentRoutes from "./routes/paymentRoutes.js";
+import wishlistRoutes from "./routes/wishlistRoutes.js";
+import { ContactController } from "./controllers/contactController.js";
 
 import { notFound, errorHandler } from "./middlewares/errorMiddleware.js";
 
@@ -52,8 +57,13 @@ app.use("/api/products", productRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/reviews", productCommentRoutes);
 app.use("/api/coupons", couponRoutes);
-app.use("/api/orders", orderRoutes);
 app.use("/api/brands", brandRoutes);
+app.use("/api/cart", cartRoutes);
+app.use("/api/addresses", addressRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/wishlist", wishlistRoutes);
+app.post("/api/contact", ContactController.create);
 // Error handling middlewares (phải nằm cuối)
 app.use(notFound);
 app.use(errorHandler);

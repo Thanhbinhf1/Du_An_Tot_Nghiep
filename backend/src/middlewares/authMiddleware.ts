@@ -53,11 +53,14 @@ export const protect = async (
       throw new AppError("Token không chứa thông tin hợp lệ.", 401);
     }
 
-    const payload = decoded as { id: string; role: UserRole };
+    const payload = decoded as { id: string; role: UserRole; sessionVersion?: number };
 
     const currentUser = await User.findById(payload.id);
     if (!currentUser)
       throw new AppError("Người dùng thuộc Token này không còn tồn tại.", 401);
+    if ((payload.sessionVersion ?? 0) !== (currentUser.session_version ?? 0)) {
+      throw new AppError("Phiên đăng nhập đã hết hiệu lực. Vui lòng đăng nhập lại.", 401);
+    }
     if (currentUser.is_blocked)
       throw new AppError("Tài khoản của bạn đã bị khóa!", 403);
 

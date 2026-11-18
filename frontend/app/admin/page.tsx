@@ -2,41 +2,27 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { API_BASE_URL, authenticatedHeaders, readApiResponse } from "@/lib/api";
-import { signOutDemo, useDemoAuth } from "@/lib/demo-auth";
-import type { Product } from "@/types/product";
+import { API_BASE_URL, authenticatedHeaders, readApiEnvelope, readApiResponse } from "@/lib/api";
+import { signOutDemo, useDemoAuth, type AccountRole } from "@/lib/demo-auth";
 import "./admin.css";
-import ProductVariantsManager from "./ProductVariantsManager";
 
-type Category = { _id: string; name: string; slug: string; description?: string };
-type StoredProduct = Omit<Product, "id" | "category"> & {
-  _id: string;
-  category_id: string | { _id: string; name: string };
-};
-type AdminOrder = {
-  _id: string;
-  user_id: { name: string; email: string } | null;
-  receiver_name: string;
-  receiver_phone: string;
-  final_amount: number;
-  order_status: "pending" | "processing" | "shipping" | "completed" | "cancelled";
-  payment_status: string;
-  payment_method: string;
-  created_at: string;
-  items: Array<{ product_name: string; sku: string; size: string; color: string; quantity: number }>;
-};
-type AdminAccount = {
-  _id: string;
-  name: string;
-  email: string;
-  phone?: string;
-  role: "customer" | "staff" | "admin";
-  is_blocked: boolean;
-  auth_provider: "local" | "google";
-  createdAt?: string;
-};
+import AdminDashboard from "./AdminDashboard";
+import AdminIcon from "./AdminIcon";
+import ProductVariantsManager from "./ProductVariantsManager";
+import AdminInventory from "./AdminInventory";
+import AdminOrders from "./AdminOrders";
+import AdminPayments from "./AdminPayments";
+import AdminCustomers from "./AdminCustomers";
+import AdminReviews from "./AdminReviews";
+import AdminOutfits from "./AdminOutfits";
+import AdminReportsSettings from "./AdminReportsSettings";
+import AdminContacts from "./AdminContacts";
+import BrandManager from "./BrandManager";
+
+const blankCategory = { name: "", slug: "", description: "", image: "", parent_id: "", status: true };
+type Category = Omit<typeof blankCategory, "parent_id"> & { _id: string; parent_id?: { _id: string; name: string } | null };
+
 type Coupon = {
   _id: string;
   code: string;
@@ -51,15 +37,6 @@ type Coupon = {
   status: boolean;
 };
 
-const blankProduct = {
-  name: "",
-  code: "",
-  color: "",
-  sizes: "",
-  price: "",
-  categoryId: "",
-  image: "",
-};
 const blankCoupon = {
   code: "",
   discount_type: "percent" as "percent" | "fixed",
@@ -71,125 +48,118 @@ const blankCoupon = {
   end_date: "",
   status: true,
 };
+
 const adminSections = [
-  { id: "variants", label: "Biến thể sản phẩm", icon: "▦" },
-  { id: "products", label: "Sản phẩm", icon: "▦" },
-  { id: "categories", label: "Danh mục", icon: "◇" },
-  { id: "accounts", label: "Tài khoản", icon: "♙" },
-  { id: "orders", label: "Đơn hàng", icon: "▤" },
-  { id: "coupons", label: "Mã giảm giá", icon: "%" },
+  { id: "dashboard", label: "Tổng quan" },
+  { id: "products", label: "Sản phẩm & Biến thể" },
+  { id: "inventory", label: "Quản lý tồn kho" },
+  { id: "orders", label: "Quản lý đơn hàng" },
+  { id: "payments", label: "Quản lý thanh toán" },
+  { id: "customers", label: "Khách hàng & Phân quyền" },
+  { id: "categories", label: "Danh mục sản phẩm" },
+  { id: "brands", label: "Thương hiệu" },
+  { id: "coupons", label: "Mã giảm giá" },
+  { id: "reviews", label: "Đánh giá sản phẩm" },
+  { id: "outfits", label: "Outfit & Tư vấn size" },
+  { id: "contacts", label: "Yêu cầu liên hệ" },
+  { id: "settings", label: "Báo cáo & Cài đặt" },
 ] as const;
+
+type AdminSectionId = (typeof adminSections)[number]["id"];
+const adminOnlySections: AdminSectionId[] = ["products", "categories", "brands"];
 
 export default function AdminPage() {
   const router = useRouter();
-  const { isLoggedIn, role, token, isHydrated } = useDemoAuth();
-  const [verified, setVerified] = useState(false);
-  const [section, setSection] = useState<(typeof adminSections)[number]["id"]>("products");
+  const { token, isHydrated, account } = useDemoAuth();
+  const [session, setSession] = useState<{ token: string; role?: AccountRole; error?: string }>();
+  const [sessionRetry, setSessionRetry] = useState(0);
+  const verifiedRole = session?.token === token ? session.role : undefined;
+  const [section, setSection] = useState<AdminSectionId>("dashboard");
   const [categories, setCategories] = useState<Category[]>([]);
-  const [products, setProducts] = useState<StoredProduct[]>([]);
-  const [orders, setOrders] = useState<AdminOrder[]>([]);
-  const [accounts, setAccounts] = useState<AdminAccount[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
-  const [accountSearch, setAccountSearch] = useState("");
-  const [updatingAccount, setUpdatingAccount] = useState<string | null>(null);
-  const [productForm, setProductForm] = useState(blankProduct);
-  const [categoryForm, setCategoryForm] = useState({ name: "", description: "" });
+  const [categoryForm, setCategoryForm] = useState(blankCategory);
   const [couponForm, setCouponForm] = useState(blankCoupon);
-  const [editingProduct, setEditingProduct] = useState<string | null>(null);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCoupon, setEditingCoupon] = useState<string | null>(null);
-  const [imageFile, setImageFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const formatPrice = (amount: number) => `${new Intl.NumberFormat("vi-VN").format(amount)} đ`;
+
+  // Auth & role check
   useEffect(() => {
     if (!isHydrated) return;
-    if (isLoggedIn && role !== "admin") router.replace("/profile");
-    if (!isLoggedIn || !token) {
+    if (!token) {
       router.replace("/dang-nhap");
       return;
     }
-    if (role !== "admin") return;
 
-    let active = true;
-    fetch(`${API_BASE_URL}/admin/session`, { headers: authenticatedHeaders(token) })
-      .then(readApiResponse<{ role: "admin" }>)
-      .then(() => {
-        if (active) setVerified(true);
+    const controller = new AbortController();
+    fetch(`${API_BASE_URL}/admin/session`, { headers: authenticatedHeaders(token), signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        if (controller.signal.aborted) return;
+        if (response.status === 401) {
+          signOutDemo();
+          router.replace("/dang-nhap");
+        } else if (response.status === 403) {
+          router.replace("/profile");
+        } else {
+          return readApiResponse<{ role: AccountRole }>(response);
+        }
       })
-      .catch(() => {
-        if (!active) return;
-        signOutDemo();
-        router.replace("/dang-nhap");
+      .then((res) => {
+        if (res && !controller.signal.aborted) setSession({ token, role: res.role });
+      })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted) {
+          setSession({ token, error: cause instanceof Error ? cause.message : "Không thể kiểm tra phiên quản trị." });
+        }
       });
-    return () => { active = false; };
-  }, [isHydrated, isLoggedIn, role, router, token]);
+    return () => controller.abort();
+  }, [isHydrated, router, sessionRetry, token]);
 
-  const adminRequest = useCallback(async <T,>(path: string, init: RequestInit = {}) => {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      ...init,
-      headers: {
-        ...authenticatedHeaders(token),
-        ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-        ...init.headers,
-      },
-    });
-    return readApiResponse<T>(response);
-  }, [token]);
+  const adminRequestPage = useCallback(
+    async <T,>(path: string, init: RequestInit = {}) => {
+      const response = await fetch(`${API_BASE_URL}${path}`, {
+        ...init,
+        headers: {
+          ...authenticatedHeaders(token),
+          ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+          ...init.headers,
+        },
+      });
+      return readApiEnvelope<T>(response, init.method === "DELETE");
+    },
+    [token],
+  );
+
+  const adminRequest = useCallback(
+    async <T,>(path: string, init?: RequestInit) => (await adminRequestPage<T>(path, init)).data,
+    [adminRequestPage],
+  );
+
+  const refreshData = useCallback((signal?: AbortSignal) =>
+    Promise.all([
+        verifiedRole === "admin" ? adminRequest<Category[]>("/categories?all=true", { signal }) : [],
+        adminRequest<Coupon[]>("/admin/coupons", { signal }),
+    ]).then(([categoryData, couponData]) => {
+      if (signal?.aborted) return;
+      setCategories(categoryData);
+      setCoupons(couponData);
+    }).catch((cause: unknown) => {
+      if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "Không thể tải dữ liệu.");
+    }),
+  [adminRequest, verifiedRole]);
 
   useEffect(() => {
-    if (!verified || !token || role !== "admin") return;
-    let active = true;
-    const loadData = async () => {
-      try {
-        const [categoryData, productData, orderData, couponData, accountData] = await Promise.all([
-          fetch(`${API_BASE_URL}/catalog/categories`).then(readApiResponse<Category[]>),
-          fetch(`${API_BASE_URL}/catalog/products`).then(readApiResponse<StoredProduct[]>),
-          adminRequest<AdminOrder[]>("/admin/orders"),
-          adminRequest<Coupon[]>("/admin/coupons"),
-          adminRequest<AdminAccount[]>("/admin/users"),
-        ]);
-        if (active) {
-          setCategories(categoryData);
-          setProducts(productData);
-          setOrders(orderData);
-          setCoupons(couponData);
-          setAccounts(accountData);
-          setError("");
-        }
-      } catch (cause) {
-        if (active) setError(cause instanceof Error ? cause.message : "Không thể tải dữ liệu quản trị.");
-      }
-    };
-    void loadData();
-    return () => { active = false; };
-  }, [adminRequest, role, token, verified]);
+    if (!verifiedRole) return;
+    const controller = new AbortController();
+    void refreshData(controller.signal);
+    return () => controller.abort();
+  }, [refreshData, verifiedRole]);
 
-  async function refreshData() {
-    const [categoryData, productData, orderData, couponData, accountData] = await Promise.all([
-      fetch(`${API_BASE_URL}/catalog/categories`).then(readApiResponse<Category[]>),
-      fetch(`${API_BASE_URL}/catalog/products`).then(readApiResponse<StoredProduct[]>),
-      adminRequest<AdminOrder[]>("/admin/orders"),
-      adminRequest<Coupon[]>("/admin/coupons"),
-      adminRequest<AdminAccount[]>("/admin/users"),
-    ]);
-    setCategories(categoryData);
-    setProducts(productData);
-    setOrders(orderData);
-    setCoupons(couponData);
-    setAccounts(accountData);
-  }
-
-  async function reloadAdminData() {
-    setError("");
-    try {
-      await refreshData();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Không thể tải lại dữ liệu quản trị.");
-    }
-  }
-
+  // Save Coupon
   async function saveCoupon(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -202,6 +172,8 @@ export default function AdminPage() {
         min_order_value: Number(couponForm.min_order_value),
         max_discount: couponForm.max_discount ? Number(couponForm.max_discount) : null,
         usage_limit: Number(couponForm.usage_limit),
+        start_date: new Date(couponForm.start_date).toISOString(),
+        end_date: new Date(couponForm.end_date).toISOString(),
       };
       await adminRequest(`/admin/coupons${editingCoupon ? `/${editingCoupon}` : ""}`, {
         method: editingCoupon ? "PUT" : "POST",
@@ -209,48 +181,12 @@ export default function AdminPage() {
       });
       setCouponForm(blankCoupon);
       setEditingCoupon(null);
-      setSuccess(editingCoupon ? "Đã cập nhật mã giảm giá." : "Đã tạo mã giảm giá.");
+      setSuccess(editingCoupon ? "Đã cập nhật mã giảm giá." : "Đã tạo mã giảm giá mới.");
       await refreshData();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Không thể lưu mã giảm giá.");
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function updateOrderStatus(orderId: string, status: AdminOrder["order_status"]) {
-    setError("");
-    setSuccess("");
-    try {
-      await adminRequest(`/admin/orders/${orderId}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
-      });
-      setSuccess("Đã cập nhật trạng thái đơn hàng.");
-      await refreshData();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Không thể cập nhật đơn hàng.");
-    }
-  }
-
-  async function updateAccountStatus(account: AdminAccount) {
-    const isBlocked = !account.is_blocked;
-    const action = isBlocked ? "khóa" : "mở khóa";
-    if (!window.confirm(`Bạn có chắc muốn ${action} tài khoản ${account.email}?`)) return;
-    setError("");
-    setSuccess("");
-    setUpdatingAccount(account._id);
-    try {
-      await adminRequest(`/admin/users/${account._id}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ is_blocked: isBlocked }),
-      });
-      setSuccess(`Đã ${action} tài khoản ${account.email}.`);
-      await refreshData();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `Không thể ${action} tài khoản.`);
-    } finally {
-      setUpdatingAccount(null);
     }
   }
 
@@ -273,64 +209,24 @@ export default function AdminPage() {
     setEditingCoupon(coupon._id);
   }
 
+  // Save Category
   async function saveCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError("");
     setSuccess("");
     try {
-      await adminRequest(`/admin/categories${editingCategory ? `/${editingCategory}` : ""}`, {
-        method: editingCategory ? "PUT" : "POST",
+      await adminRequest(`/categories${editingCategory ? `/${editingCategory}` : ""}`, {
+        method: editingCategory ? "PATCH" : "POST",
         body: JSON.stringify(categoryForm),
       });
-      setCategoryForm({ name: "", description: "" });
+      setCategoryForm(blankCategory);
       setEditingCategory(null);
-      window.dispatchEvent(new Event("bapd-catalog-change"));
+      window.dispatchEvent(new Event("fstyle-catalog-change"));
       setSuccess(editingCategory ? "Đã cập nhật danh mục." : "Đã tạo danh mục.");
       await refreshData();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Không thể lưu danh mục.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveProduct(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    setSuccess("");
-    try {
-      let image = productForm.image;
-      if (imageFile) {
-        const uploadData = new FormData();
-        uploadData.set("image", imageFile);
-        const uploaded = await adminRequest<{ url: string }>("/admin/uploads", {
-          method: "POST",
-          body: uploadData,
-        });
-        image = `${API_BASE_URL.replace(/\/api\/?$/, "")}${uploaded.url}`;
-      }
-      if (!image.trim()) throw new Error("Hãy chọn ảnh hoặc nhập đường dẫn ảnh.");
-      const payload = {
-        ...productForm,
-        categoryId: productForm.categoryId,
-        price: Number(productForm.price),
-        sizes: productForm.sizes.split(",").map((size) => size.trim()).filter(Boolean),
-        image,
-      };
-      await adminRequest(`/admin/products${editingProduct ? `/${editingProduct}` : ""}`, {
-        method: editingProduct ? "PUT" : "POST",
-        body: JSON.stringify(payload),
-      });
-      setProductForm(blankProduct);
-      setImageFile(null);
-      setEditingProduct(null);
-      window.dispatchEvent(new Event("bapd-catalog-change"));
-      setSuccess(editingProduct ? "Đã cập nhật sản phẩm." : "Đã thêm sản phẩm.");
-      await refreshData();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Không thể lưu sản phẩm.");
     } finally {
       setBusy(false);
     }
@@ -342,7 +238,7 @@ export default function AdminPage() {
     setSuccess("");
     try {
       await adminRequest(path, { method: "DELETE" });
-      window.dispatchEvent(new Event("bapd-catalog-change"));
+      window.dispatchEvent(new Event("fstyle-catalog-change"));
       setSuccess(`Đã xóa ${label}.`);
       await refreshData();
     } catch (cause) {
@@ -350,198 +246,542 @@ export default function AdminPage() {
     }
   }
 
-  function editProduct(product: StoredProduct) {
-    const categoryId = typeof product.category_id === "string"
-      ? product.category_id
-      : product.category_id._id;
-    setProductForm({
-      name: product.name,
-      code: product.code,
-      color: product.color,
-      sizes: product.sizes.join(", "),
-      price: String(product.price),
-      categoryId,
-      image: product.image,
-    });
-    setEditingProduct(product._id);
-    setImageFile(null);
-    setSection("products");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  const sessionError = session?.token === token ? session.error : undefined;
+  if (sessionError) {
+    return (
+      <div className="admin-login-prompt" role="alert">
+        <p>{sessionError}</p>
+        <button type="button" onClick={() => { setSession(undefined); setSessionRetry((value) => value + 1); }}>Thử lại</button>
+      </div>
+    );
+  }
+  if (!isHydrated || !verifiedRole) {
+    return (
+      <div className="admin-login-prompt">
+        <div className="spinner-dot" />
+        <p>Đang kiểm tra quyền quản trị F.Style Store...</p>
+      </div>
+    );
   }
 
-  if (!isHydrated || !isLoggedIn || role !== "admin" || !verified) {
-    return <div className="admin-login-prompt">Đang kiểm tra quyền quản trị...</div>;
-  }
-
-  const sectionName = adminSections.find((item) => item.id === section)?.label ?? "Quản trị";
-  const formatPrice = (amount: number) => `${new Intl.NumberFormat("vi-VN").format(amount)} đ`;
-  const statusLabels: Record<AdminOrder["order_status"], string> = {
-    pending: "Chờ xác nhận",
-    processing: "Đang xử lý",
-    shipping: "Đang giao",
-    completed: "Hoàn thành",
-    cancelled: "Đã hủy",
-  };
-  const filteredAccounts = accounts.filter((account) => {
-    const query = accountSearch.trim().toLocaleLowerCase();
-    return !query || [account.name, account.email, account.phone ?? ""]
-      .some((value) => value.toLocaleLowerCase().includes(query));
-  });
-  const accountRoleLabels: Record<AdminAccount["role"], string> = {
-    customer: "Khách hàng",
-    staff: "Nhân viên",
-    admin: "Quản trị",
-  };
+  const isAdmin = verifiedRole === "admin";
+  const activeSection = !isAdmin && adminOnlySections.includes(section) ? "dashboard" : section;
+  const sectionName = adminSections.find((item) => item.id === activeSection)?.label ?? "Quản trị";
 
   return (
     <section className="admin-shell">
+      {/* SIDEBAR NAVIGATION */}
       <aside className="admin-sidebar">
-        <Link className="admin-brand" href="/" aria-label="BAPD Commerce - về cửa hàng">
-          <Image className="admin-brand-logo" src="/logo-vcs.png" alt="VCS BAPD" width={52} height={52} priority />
-          <span>BAPD <small>COMMERCE</small></span>
+        <Link className="admin-brand" href="/" aria-label="F.Style Store - về cửa hàng">
+          <span className="admin-brand-name">F.Style</span>
+          <small>Quản trị</small>
         </Link>
-        <span className="admin-nav-label">KHÔNG GIAN QUẢN TRỊ</span>
+
         <nav className="admin-nav" aria-label="Điều hướng quản trị">
-          {adminSections.map((item) => (
-            <button key={item.id} type="button" className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)}>
-              <span className="admin-nav-icon">{item.icon}</span>{item.label}
-              {item.id !== "variants" && <span className="admin-nav-count">{item.id === "products" ? products.length : item.id === "categories" ? categories.length : item.id === "orders" ? orders.length : item.id === "coupons" ? coupons.length : accounts.length}</span>}
+          {adminSections.filter((item) => isAdmin || !adminOnlySections.includes(item.id)).map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={activeSection === item.id ? "active" : ""}
+              aria-current={activeSection === item.id ? "page" : undefined}
+              onClick={() => setSection(item.id)}
+            >
+              <span className="admin-nav-icon"><AdminIcon name={item.id} /></span>
+              {item.label}
             </button>
           ))}
         </nav>
+
         <div className="admin-sidebar-bottom">
-          <div className="admin-profile-chip"><span className="admin-avatar">A</span><span>Quản trị viên<small>Toàn quyền hệ thống</small></span></div>
+          <div className="admin-profile-chip">
+            <span className="admin-avatar">{isAdmin ? "A" : "S"}</span>
+            <div>
+              <strong>{account || (isAdmin ? "Quản trị viên" : "Nhân viên")}</strong>
+              <small>{isAdmin ? "Toàn quyền hệ thống" : "Vận hành đơn & kho"}</small>
+            </div>
+          </div>
           <Link href="/">← <span>Quay lại cửa hàng</span></Link>
         </div>
       </aside>
 
-      <main className="admin-main">
+      {/* MAIN CONTENT AREA */}
+      <div className="admin-main">
         <header className="admin-topbar">
-          <div><span className="admin-breadcrumb">BAPD / QUẢN TRỊ</span><h1>{sectionName}</h1></div>
-          <div className="admin-topbar-right"><span className="admin-status"><i /> Hệ thống hoạt động</span><Link className="admin-store-link" href="/">Xem cửa hàng ↗</Link></div>
-        </header>
-        <div className="admin-content">
-          <div className="admin-welcome"><div><span className="admin-eyebrow">BAPD STORE · ADMIN CONSOLE</span><h2>Trung tâm vận hành</h2><p>Quản lý nội dung và hoạt động cửa hàng tại một nơi.</p></div></div>
-          <div className="admin-overview" aria-label="Tổng quan cửa hàng">
-            <article className="admin-stat-card"><span className="admin-stat-icon">▦</span><div><p>Sản phẩm</p><strong>{products.length}</strong><small>Đang kinh doanh</small></div></article>
-            <article className="admin-stat-card"><span className="admin-stat-icon admin-stat-icon-red">◇</span><div><p>Danh mục</p><strong>{categories.length}</strong><small>Nhóm sản phẩm</small></div></article>
-            <article className="admin-stat-card"><span className="admin-stat-icon">▤</span><div><p>Đơn hàng</p><strong>{orders.length}</strong><small>Đơn lưu trên hệ thống</small></div></article>
-            <article className="admin-stat-card"><span className="admin-stat-icon">%</span><div><p>Mã giảm giá</p><strong>{coupons.length}</strong><small>Chương trình khuyến mãi</small></div></article>
+          <div>
+            <h1>{sectionName}</h1>
           </div>
+          <div className="admin-topbar-right">
+            <span className="admin-status">
+              <i /> Hệ thống trực tuyến
+            </span>
+            <Link className="admin-store-link" href="/" target="_blank">
+              Xem cửa hàng ↗
+            </Link>
+          </div>
+        </header>
+
+        <div className="admin-content" key={activeSection}>
+          {activeSection === "dashboard" && (
+            <div className="admin-welcome">
+              <div>
+                <h2>Tình hình cửa hàng</h2>
+                <p>Theo dõi doanh thu, đơn hàng và những mặt hàng sắp hết.</p>
+              </div>
+              <button className="admin-button" type="button" onClick={() => setSection("orders")}>
+                Xem đơn hàng <span aria-hidden="true">↗</span>
+              </button>
+            </div>
+          )}
+
           {error && <p className="admin-alert" role="alert">{error}</p>}
           {success && <p className="admin-success" role="status">{success}</p>}
 
-          {section === "variants" && <div className="admin-panel"><ProductVariantsManager request={adminRequest} /></div>}
+          {/* 1. DASHBOARD */}
+          {activeSection === "dashboard" && (
+            <AdminDashboard
+              request={adminRequest}
+              onNavigate={(tab) => setSection(tab as AdminSectionId)}
+            />
+          )}
 
-          {section === "categories" && <>
-            <div className="admin-panel"><h2>{editingCategory ? "Sửa danh mục" : "Tạo danh mục mới"}</h2>
-              <form className="admin-form" onSubmit={saveCategory}>
-                <label>Tên danh mục<input required value={categoryForm.name} onChange={(event) => setCategoryForm({ ...categoryForm, name: event.target.value })} /></label>
-                <label>Mô tả<input value={categoryForm.description} onChange={(event) => setCategoryForm({ ...categoryForm, description: event.target.value })} /></label>
-                <div className="admin-actions wide"><button className="admin-button" disabled={busy}>{busy ? "Đang lưu..." : editingCategory ? "Lưu thay đổi" : "Tạo danh mục"}</button>
-                  {editingCategory && <button type="button" onClick={() => { setEditingCategory(null); setCategoryForm({ name: "", description: "" }); }}>Hủy</button>}</div>
-              </form>
-            </div>
-            <div className="admin-panel"><div className="admin-panel-heading"><div><h2>Danh sách danh mục</h2><p>Các nhóm sản phẩm trong cửa hàng.</p></div><span>{categories.length} mục</span></div>
-              <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Tên</th><th>Mô tả</th><th>Thao tác</th></tr></thead>
-                <tbody>{categories.map((category) => <tr key={category._id}><td><strong>{category.name}</strong></td><td>{category.description || "—"}</td>
-                  <td><div className="admin-actions"><button onClick={() => { setEditingCategory(category._id); setCategoryForm({ name: category.name, description: category.description ?? "" }); }}>Sửa</button>
-                    <button className="danger" onClick={() => void deleteEntry(`/admin/categories/${category._id}`, "danh mục")}>Xóa</button></div></td></tr>)}</tbody>
-              </table></div>
-            </div>
-          </>}
+          {/* 2. SẢN PHẨM & BIẾN THỂ */}
+          {activeSection === "products" && (
+            <ProductVariantsManager
+              request={adminRequest} paginatedRequest={adminRequestPage}
+            />
+          )}
 
-          {section === "products" && <>
-            <div className="admin-panel"><h2>{editingProduct ? "Sửa sản phẩm" : "Thêm sản phẩm"}</h2>
-              <form className="admin-form" onSubmit={saveProduct}>
-                <label>Tên sản phẩm<input required value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} /></label>
-                <label>Mã sản phẩm<input required value={productForm.code} onChange={(event) => setProductForm({ ...productForm, code: event.target.value })} /></label>
-                <label>Danh mục<select required value={productForm.categoryId} onChange={(event) => setProductForm({ ...productForm, categoryId: event.target.value })}><option value="">Chọn danh mục</option>{categories.map((category) => <option key={category._id} value={category._id}>{category.name}</option>)}</select></label>
-                <label>Màu sắc<input required value={productForm.color} onChange={(event) => setProductForm({ ...productForm, color: event.target.value })} /></label>
-                <label>Giá (VND)<input required type="number" min="0" value={productForm.price} onChange={(event) => setProductForm({ ...productForm, price: event.target.value })} /></label>
-                <label>Kích cỡ<input required placeholder="S, M, L, XL" value={productForm.sizes} onChange={(event) => setProductForm({ ...productForm, sizes: event.target.value })} /></label>
-                <label className="wide">Tải ảnh lên (JPG, PNG, WEBP; tối đa 5MB)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0] ?? null)} /></label>
-                <label className="wide">Hoặc đường dẫn ảnh<input value={productForm.image} onChange={(event) => { setProductForm({ ...productForm, image: event.target.value }); setImageFile(null); }} /></label>
-                <div className="admin-actions wide"><button className="admin-button" disabled={busy || !categories.length}>{busy ? "Đang lưu..." : editingProduct ? "Lưu thay đổi" : "Thêm sản phẩm"}</button>
-                  {editingProduct && <button type="button" onClick={() => { setEditingProduct(null); setProductForm(blankProduct); setImageFile(null); }}>Hủy</button>}
-                  {!categories.length && <span className="admin-muted">Tạo danh mục trước khi thêm sản phẩm.</span>}</div>
-              </form>
-            </div>
-            <div className="admin-panel"><div className="admin-panel-heading"><div><h2>Danh sách sản phẩm</h2><p>Thông tin sản phẩm đang hiển thị trên cửa hàng.</p></div><span>{products.length} mục</span></div>
-              <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Ảnh</th><th>Sản phẩm</th><th>Danh mục</th><th>Giá</th><th>Thao tác</th></tr></thead>
-                <tbody>{products.map((product) => <tr key={product._id}><td><Image src={product.image} alt="" width={54} height={68} unoptimized /></td>
-                  <td><strong>{product.name}</strong><br /><small>{product.code}</small></td><td><span className="admin-category-tag">{typeof product.category_id === "string" ? "—" : product.category_id.name}</span></td>
-                  <td><strong>{formatPrice(product.price)}</strong></td><td><div className="admin-actions"><button onClick={() => editProduct(product)}>Sửa</button>
-                    <button className="danger" onClick={() => void deleteEntry(`/admin/products/${product._id}`, "sản phẩm")}>Xóa</button></div></td></tr>)}</tbody>
-              </table></div>
-            </div>
-          </>}
+          {/* 3. TỒN KHO */}
+          {activeSection === "inventory" && <AdminInventory request={adminRequest} paginatedRequest={adminRequestPage} />}
 
-          {section === "orders" && <div className="admin-panel"><div className="admin-panel-heading"><div><h2>Quản lý đơn hàng</h2><p>Theo dõi khách mua, giá trị và cập nhật tiến độ đơn.</p></div><div className="admin-order-heading-actions"><span>{orders.length} đơn</span><button type="button" onClick={() => void reloadAdminData()}>Tải lại</button></div></div>
-            <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Mã đơn / ngày tạo</th><th>Khách hàng</th><th>Sản phẩm</th><th>Thanh toán</th><th>Tổng tiền</th><th>Trạng thái</th></tr></thead>
-              <tbody>{orders.map((order) => <tr key={order._id}><td><strong>#{order._id.slice(-8).toUpperCase()}</strong><br /><small>{new Date(order.created_at).toLocaleString("vi-VN")}</small></td>
-                <td><strong>{order.receiver_name}</strong><br /><small>{order.user_id?.email ?? order.receiver_phone}</small></td>
-                <td>{order.items.length ? order.items.map((item) => `${item.product_name} · ${item.size} × ${item.quantity}`).join(", ") : "Không có chi tiết"}</td>
-                <td>{order.payment_method}<br /><small>{order.payment_status}</small></td><td><strong>{formatPrice(order.final_amount)}</strong></td>
-                <td><select className="admin-status-select" aria-label={`Trạng thái đơn ${order._id}`} value={order.order_status} onChange={(event) => void updateOrderStatus(order._id, event.target.value as AdminOrder["order_status"])}>
-                  {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td></tr>)}
-                {!orders.length && <tr><td className="admin-empty" colSpan={6}>Chưa có đơn hàng nào được lưu trên hệ thống.</td></tr>}</tbody>
-            </table></div>
-          </div>}
+          {/* 4. ĐƠN HÀNG */}
+          {activeSection === "orders" && <AdminOrders request={adminRequest} isAdmin={isAdmin} />}
 
-          {section === "accounts" && <div className="admin-panel">
-            <div className="admin-panel-heading">
-              <div><h2>Quản lý tài khoản</h2><p>Xem tài khoản đã đăng ký và khóa hoặc mở khóa quyền truy cập.</p></div>
-              <span>{accounts.length} tài khoản</span>
-            </div>
-            <label className="admin-account-search">Tìm theo tên, email hoặc số điện thoại
-              <input type="search" value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder="Nhập thông tin tài khoản..." />
-            </label>
-            <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Tài khoản</th><th>Số điện thoại</th><th>Loại tài khoản</th><th>Đăng ký</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
-              <tbody>{filteredAccounts.map((account) => <tr key={account._id}>
-                <td><strong>{account.name}</strong><br /><small>{account.email}</small></td>
-                <td>{account.phone || "—"}</td>
-                <td>{accountRoleLabels[account.role]}{account.auth_provider === "google" ? <><br /><small>Google</small></> : null}</td>
-                <td>{account.createdAt ? new Date(account.createdAt).toLocaleDateString("vi-VN") : "—"}</td>
-                <td><span className={`admin-account-state ${account.is_blocked ? "blocked" : "active"}`}>{account.is_blocked ? "Đã khóa" : "Đang hoạt động"}</span></td>
-                <td>{account.role === "admin"
-                  ? <span className="admin-muted">Không thể khóa admin</span>
-                  : <div className="admin-actions"><button className={account.is_blocked ? "" : "danger"} disabled={updatingAccount === account._id} onClick={() => void updateAccountStatus(account)}>{updatingAccount === account._id ? "Đang cập nhật..." : account.is_blocked ? "Mở khóa" : "Khóa tài khoản"}</button></div>}</td>
-              </tr>)}
-              {!filteredAccounts.length && <tr><td className="admin-empty" colSpan={6}>{accounts.length ? "Không tìm thấy tài khoản phù hợp." : "Chưa có tài khoản nào."}</td></tr>}</tbody>
-            </table></div>
-          </div>}
+          {/* 5. THANH TOÁN */}
+          {activeSection === "payments" && <AdminPayments request={adminRequest} />}
 
-          {section === "coupons" && <>
-            <div className="admin-panel"><h2>{editingCoupon ? "Cập nhật mã giảm giá" : "Tạo mã giảm giá"}</h2>
-              <form className="admin-form" onSubmit={saveCoupon}>
-                <label>Mã giảm giá<input required value={couponForm.code} onChange={(event) => setCouponForm({ ...couponForm, code: event.target.value.toUpperCase() })} placeholder="VD: WELCOME10" /></label>
-                <label>Loại ưu đãi<select value={couponForm.discount_type} onChange={(event) => setCouponForm({ ...couponForm, discount_type: event.target.value as "percent" | "fixed" })}><option value="percent">Phần trăm (%)</option><option value="fixed">Số tiền cố định (VND)</option></select></label>
-                <label>Giá trị giảm<input required type="number" min="1" max={couponForm.discount_type === "percent" ? 100 : undefined} value={couponForm.discount_value} onChange={(event) => setCouponForm({ ...couponForm, discount_value: event.target.value })} /></label>
-                <label>Đơn tối thiểu (VND)<input required type="number" min="0" value={couponForm.min_order_value} onChange={(event) => setCouponForm({ ...couponForm, min_order_value: event.target.value })} /></label>
-                <label>Giảm tối đa (VND, tùy chọn)<input type="number" min="0" value={couponForm.max_discount} onChange={(event) => setCouponForm({ ...couponForm, max_discount: event.target.value })} /></label>
-                <label>Lượt sử dụng tối đa<input required type="number" min="1" step="1" value={couponForm.usage_limit} onChange={(event) => setCouponForm({ ...couponForm, usage_limit: event.target.value })} /></label>
-                <label>Bắt đầu<input required type="datetime-local" value={couponForm.start_date} onChange={(event) => setCouponForm({ ...couponForm, start_date: event.target.value })} /></label>
-                <label>Kết thúc<input required type="datetime-local" value={couponForm.end_date} onChange={(event) => setCouponForm({ ...couponForm, end_date: event.target.value })} /></label>
-                <label className="admin-coupon-toggle"><input type="checkbox" checked={couponForm.status} onChange={(event) => setCouponForm({ ...couponForm, status: event.target.checked })} /> Kích hoạt mã sau khi lưu</label>
-                <div className="admin-actions wide"><button className="admin-button" disabled={busy}>{busy ? "Đang lưu..." : editingCoupon ? "Lưu thay đổi" : "Tạo mã"}</button>
-                  {editingCoupon && <button type="button" onClick={() => { setEditingCoupon(null); setCouponForm(blankCoupon); }}>Hủy</button>}</div>
-              </form>
-            </div>
-            <div className="admin-panel"><div className="admin-panel-heading"><div><h2>Chương trình ưu đãi</h2><p>Mã giảm giá và tình trạng sử dụng.</p></div><span>{coupons.length} mã</span></div>
-              <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Mã</th><th>Mức giảm</th><th>Điều kiện</th><th>Đã dùng</th><th>Thời hạn</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
-                <tbody>{coupons.map((coupon) => <tr key={coupon._id}><td><strong>{coupon.code}</strong></td>
-                  <td>{coupon.discount_type === "percent" ? `${coupon.discount_value}%` : formatPrice(coupon.discount_value)}</td>
-                  <td>Đơn từ {formatPrice(coupon.min_order_value)}{coupon.max_discount != null ? <><br /><small>Tối đa {formatPrice(coupon.max_discount)}</small></> : null}</td>
-                  <td>{coupon.used_count}/{coupon.usage_limit}</td><td>{new Date(coupon.start_date).toLocaleDateString("vi-VN")} – {new Date(coupon.end_date).toLocaleDateString("vi-VN")}</td>
-                  <td><span className={`admin-coupon-state ${coupon.status ? "enabled" : ""}`}>{coupon.status ? "Đang bật" : "Đã tắt"}</span></td>
-                  <td><div className="admin-actions"><button onClick={() => editCoupon(coupon)}>Sửa</button><button className="danger" onClick={() => void deleteEntry(`/admin/coupons/${coupon._id}`, "mã giảm giá")}>Xóa</button></div></td></tr>)}
-                  {!coupons.length && <tr><td className="admin-empty" colSpan={7}>Chưa có mã giảm giá nào.</td></tr>}</tbody>
-              </table></div>
-            </div>
-          </>}
+          {/* 6. KHÁCH HÀNG & PHÂN QUYỀN */}
+          {activeSection === "customers" && (
+            <AdminCustomers
+              request={adminRequest}
+              currentUserRole={verifiedRole}
+            />
+          )}
+
+          {/* 7. DANH MỤC */}
+          {activeSection === "categories" && (
+            <>
+              <div className="admin-panel">
+                <h2>{editingCategory ? "Sửa danh mục" : "Tạo danh mục mới"}</h2>
+                <form className="admin-form" onSubmit={saveCategory}>
+                  <label>
+                    Tên danh mục
+                    <input
+                      required
+                      value={categoryForm.name}
+                      onChange={(event) =>
+                        setCategoryForm({ ...categoryForm, name: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Slug danh mục
+                    <input
+                      required
+                      value={categoryForm.slug}
+                      onChange={(event) =>
+                        setCategoryForm({ ...categoryForm, slug: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Danh mục cha
+                    <select
+                      value={categoryForm.parent_id}
+                      onChange={(event) =>
+                        setCategoryForm({ ...categoryForm, parent_id: event.target.value })
+                      }
+                    >
+                      <option value="">Danh mục gốc (Không có cha)</option>
+                      {categories
+                        .filter((item) => item._id !== editingCategory)
+                        .map((item) => (
+                          <option value={item._id} key={item._id}>
+                            {item.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    Đường dẫn ảnh
+                    <input
+                      value={categoryForm.image}
+                      onChange={(event) =>
+                        setCategoryForm({ ...categoryForm, image: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Mô tả
+                    <input
+                      value={categoryForm.description}
+                      onChange={(event) =>
+                        setCategoryForm({ ...categoryForm, description: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Hiển thị
+                    <select
+                      value={String(categoryForm.status)}
+                      onChange={(event) =>
+                        setCategoryForm({
+                          ...categoryForm,
+                          status: event.target.value === "true",
+                        })
+                      }
+                    >
+                      <option value="true">Đang hiển thị</option>
+                      <option value="false">Đã ẩn</option>
+                    </select>
+                  </label>
+                  <div className="admin-actions wide">
+                    <button className="admin-button" disabled={busy}>
+                      {busy ? "Đang lưu..." : editingCategory ? "Lưu thay đổi" : "Tạo danh mục"}
+                    </button>
+                    {editingCategory && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingCategory(null);
+                          setCategoryForm(blankCategory);
+                        }}
+                      >
+                        Hủy
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+
+              <div className="admin-panel">
+                <div className="admin-panel-heading">
+                  <div>
+                    <h2>Danh sách danh mục ({categories.length})</h2>
+                    <p>Phân loại sản phẩm theo cấu trúc cha / con.</p>
+                  </div>
+                </div>
+                <div className="admin-table-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Tên danh mục</th>
+                        <th>Slug</th>
+                        <th>Danh mục cha</th>
+                        <th>Mô tả</th>
+                        <th style={{ textAlign: "right" }}>Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categories.map((category) => (
+                        <tr key={category._id}>
+                          <td>
+                            <strong>{category.name}</strong>
+                            {category.status === false && (
+                              <small style={{ color: "#ef4444" }}> · Đã ẩn</small>
+                            )}
+                          </td>
+                          <td>
+                            <code>{category.slug}</code>
+                          </td>
+                          <td>
+                            {category.parent_id?.name ? (
+                              <span className="spec-chip">{category.parent_id.name}</span>
+                            ) : (
+                              <span className="admin-muted">Gốc</span>
+                            )}
+                          </td>
+                          <td>{category.description || "—"}</td>
+                          <td style={{ textAlign: "right" }}>
+                            <div className="admin-actions" style={{ justifyContent: "flex-end" }}>
+                              <button
+                                onClick={() => {
+                                  setEditingCategory(category._id);
+                                  setCategoryForm({
+                                    name: category.name,
+                                    slug: category.slug,
+                                    description: category.description ?? "",
+                                    image: category.image ?? "",
+                                    parent_id: category.parent_id?._id ?? "",
+                                    status: category.status,
+                                  });
+                                }}
+                              >
+                                Sửa
+                              </button>
+                              <button
+                                className="danger-btn"
+                                onClick={() =>
+                                  void deleteEntry(`/categories/${category._id}`, "danh mục")
+                                }
+                              >
+                                Xóa
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* 8. THƯƠNG HIỆU */}
+          {activeSection === "brands" && <BrandManager request={adminRequest} />}
+
+          {/* 9. MÃ GIẢM GIÁ */}
+          {activeSection === "coupons" && (
+            <>
+              <div className="admin-panel">
+                <h2>{editingCoupon ? "Cập nhật mã giảm giá" : "Tạo mã giảm giá"}</h2>
+                <form className="admin-form" onSubmit={saveCoupon}>
+                  <label>
+                    Mã giảm giá
+                    <input
+                      required
+                      value={couponForm.code}
+                      onChange={(event) =>
+                        setCouponForm({
+                          ...couponForm,
+                          code: event.target.value.toUpperCase(),
+                        })
+                      }
+                      placeholder="VD: FSTYLE10"
+                    />
+                  </label>
+                  <label>
+                    Loại ưu đãi
+                    <select
+                      value={couponForm.discount_type}
+                      onChange={(event) =>
+                        setCouponForm({
+                          ...couponForm,
+                          discount_type: event.target.value as "percent" | "fixed",
+                        })
+                      }
+                    >
+                      <option value="percent">Phần trăm (%)</option>
+                      <option value="fixed">Số tiền cố định (VND)</option>
+                    </select>
+                  </label>
+                  <label>
+                    Giá trị giảm
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      max={couponForm.discount_type === "percent" ? 100 : undefined}
+                      value={couponForm.discount_value}
+                      onChange={(event) =>
+                        setCouponForm({ ...couponForm, discount_value: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Đơn tối thiểu (VND)
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      value={couponForm.min_order_value}
+                      onChange={(event) =>
+                        setCouponForm({ ...couponForm, min_order_value: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Giảm tối đa (VND, tùy chọn)
+                    <input
+                      type="number"
+                      min="0"
+                      value={couponForm.max_discount}
+                      onChange={(event) =>
+                        setCouponForm({ ...couponForm, max_discount: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Lượt sử dụng tối đa
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={couponForm.usage_limit}
+                      onChange={(event) =>
+                        setCouponForm({ ...couponForm, usage_limit: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Bắt đầu
+                    <input
+                      required
+                      type="datetime-local"
+                      value={couponForm.start_date}
+                      onChange={(event) =>
+                        setCouponForm({ ...couponForm, start_date: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Kết thúc
+                    <input
+                      required
+                      type="datetime-local"
+                      value={couponForm.end_date}
+                      onChange={(event) =>
+                        setCouponForm({ ...couponForm, end_date: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label className="admin-coupon-toggle">
+                    <input
+                      type="checkbox"
+                      checked={couponForm.status}
+                      onChange={(event) =>
+                        setCouponForm({ ...couponForm, status: event.target.checked })
+                      }
+                    />{" "}
+                    Kích hoạt mã sau khi lưu
+                  </label>
+                  <div className="admin-actions wide">
+                    <button className="admin-button" disabled={busy}>
+                      {busy ? "Đang lưu..." : editingCoupon ? "Lưu thay đổi" : "Tạo mã"}
+                    </button>
+                    {editingCoupon && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingCoupon(null);
+                          setCouponForm(blankCoupon);
+                        }}
+                      >
+                        Hủy
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+
+              <div className="admin-panel">
+                <div className="admin-panel-heading">
+                  <div>
+                    <h2>Chương trình ưu đãi ({coupons.length} mã)</h2>
+                    <p>Mã giảm giá và tình trạng sử dụng.</p>
+                  </div>
+                </div>
+                <div className="admin-table-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Mã</th>
+                        <th>Mức giảm</th>
+                        <th>Điều kiện</th>
+                        <th>Đã dùng</th>
+                        <th>Thời hạn</th>
+                        <th>Trạng thái</th>
+                        <th style={{ textAlign: "right" }}>Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {coupons.map((coupon) => (
+                        <tr key={coupon._id}>
+                          <td>
+                            <strong>{coupon.code}</strong>
+                          </td>
+                          <td>
+                            {coupon.discount_type === "percent"
+                              ? `${coupon.discount_value}%`
+                              : formatPrice(coupon.discount_value)}
+                          </td>
+                          <td>
+                            Đơn từ {formatPrice(coupon.min_order_value)}
+                            {coupon.max_discount != null ? (
+                              <>
+                                <br />
+                                <small>Tối đa {formatPrice(coupon.max_discount)}</small>
+                              </>
+                            ) : null}
+                          </td>
+                          <td>
+                            {coupon.used_count}/{coupon.usage_limit}
+                          </td>
+                          <td>
+                            {new Date(coupon.start_date).toLocaleDateString("vi-VN")} –{" "}
+                            {new Date(coupon.end_date).toLocaleDateString("vi-VN")}
+                          </td>
+                          <td>
+                            <span
+                              className={`admin-coupon-state ${coupon.status ? "enabled" : ""}`}
+                            >
+                              {coupon.status ? "Đang bật" : "Đã tắt"}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <div className="admin-actions" style={{ justifyContent: "flex-end" }}>
+                              <button onClick={() => editCoupon(coupon)}>Sửa</button>
+                              {isAdmin && (
+                                <button
+                                  className="danger-btn"
+                                  onClick={() =>
+                                    void deleteEntry(
+                                      `/admin/coupons/${coupon._id}`,
+                                      "mã giảm giá",
+                                    )
+                                  }
+                                >
+                                  Xóa
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {!coupons.length && (
+                        <tr>
+                          <td className="admin-empty" colSpan={7}>
+                            Chưa có mã giảm giá nào.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* 10. ĐÁNH GIÁ SẢN PHẨM */}
+          {activeSection === "reviews" && <AdminReviews request={adminRequest} />}
+
+          {/* 11. OUTFIT & TƯ VẤN SIZE */}
+          {activeSection === "outfits" && <AdminOutfits request={adminRequest} paginatedRequest={adminRequestPage} isAdmin={isAdmin} />}
+
+          {/* 12. YÊU CẦU LIÊN HỆ */}
+          {activeSection === "contacts" && <AdminContacts request={adminRequest} />}
+
+          {/* 13. BÁO CÁO & CÀI ĐẶT */}
+          {activeSection === "settings" && (
+            <AdminReportsSettings
+              request={adminRequest}
+              currentUserRole={verifiedRole}
+            />
+          )}
         </div>
-      </main>
+      </div>
     </section>
   );
 }

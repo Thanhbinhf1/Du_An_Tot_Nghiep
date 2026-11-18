@@ -1,27 +1,33 @@
 import { useEffect, useState, type FormEvent } from "react";
+import ProductImagesManager from "./ProductImagesManager";
+import type { readApiEnvelope } from "@/lib/api";
 
-type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
+export type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
+export type AdminPaginatedRequest = <T>(path: string, init?: RequestInit) => ReturnType<typeof readApiEnvelope<T>>;
 type Option = { _id: string; name: string };
-type ManagedProduct = Option & { status: boolean };
+type ManagedProduct = Option & Omit<typeof emptyProduct, "gender"> & { gender?: string };
 type Variant = {
   _id: string; sku: string; size: string; color: string; price: number;
   sale_price: number | null; stock_quantity: number; status: boolean;
 };
-const emptyProduct = { name: "", slug: "", category_id: "", brand_id: "", description: "" };
+const productGenders = ["Nam", "Nữ", "Trẻ em", "Em bé", "Unisex"];
+const emptyProduct = { gender: "Unisex", name: "", slug: "", category_id: "", brand_id: "", description: "", status: true, is_featured: false };
 const emptyVariant = { sku: "", size: "", color: "", price: "", sale_price: "", stock_quantity: "0", status: true };
 const money = (value: number) => `${new Intl.NumberFormat("vi-VN").format(value)} ₫`;
 
-export default function ProductVariantsManager({ request }: { request: AdminRequest }) {
+export default function ProductVariantsManager({ request, paginatedRequest }: { request: AdminRequest; paginatedRequest: AdminPaginatedRequest }) {
   const [products, setProducts] = useState<ManagedProduct[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
   const [brands, setBrands] = useState<Option[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [revision, setRevision] = useState(0);
   const [loadedRevision, setLoadedRevision] = useState(-1);
   const [loadedPage, setLoadedPage] = useState(0);
   const [form, setForm] = useState(emptyProduct);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingId, setEditingId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [optionsError, setOptionsError] = useState("");
@@ -30,22 +36,24 @@ export default function ProductVariantsManager({ request }: { request: AdminRequ
 
   useEffect(() => {
     const controller = new AbortController();
-    request<ManagedProduct[]>(`/products/admin?page=${page}&limit=25`, { signal: controller.signal })
-      .then((data) => {
+    paginatedRequest<ManagedProduct[]>(`/products/admin?page=${page}&limit=25`, { signal: controller.signal })
+      .then(({ data, pagination }) => {
+        if (controller.signal.aborted) return;
         setProducts(data);
+        setTotalPages(pagination?.totalPages || 1);
         setSelectedId((current) => data.some((product) => product._id === current) ? current : data[0]?._id ?? "");
         setError("");
       })
       .catch((cause) => { if (!controller.signal.aborted) { setProducts([]); setSelectedId(""); setError(cause instanceof Error ? cause.message : "Không tải được sản phẩm."); } })
       .finally(() => { if (!controller.signal.aborted) { setLoadedPage(page); setLoadedRevision(revision); } });
     return () => controller.abort();
-  }, [page, request, revision]);
+  }, [page, paginatedRequest, revision]);
 
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
-      request<Option[]>("/categories", { signal: controller.signal }),
-      request<Option[]>("/brands", { signal: controller.signal }),
+      request<Option[]>("/categories?all=true", { signal: controller.signal }),
+      request<Option[]>("/brands?all=true", { signal: controller.signal }),
     ]).then(([categoryData, brandData]) => { setCategories(categoryData); setBrands(brandData); setOptionsError(""); })
       .catch((cause) => { if (!controller.signal.aborted) setOptionsError(cause instanceof Error ? cause.message : "Không tải được danh mục/thương hiệu."); });
     return () => controller.abort();
@@ -55,11 +63,15 @@ export default function ProductVariantsManager({ request }: { request: AdminRequ
     event.preventDefault();
     setBusy(true); setError(""); setSuccess("");
     try {
-      const product = await request<ManagedProduct>("/products", { method: "POST", body: JSON.stringify(form) });
+      const product = await request<ManagedProduct>(editingId ? `/products/${editingId}` : "/products", {
+        method: editingId ? "PATCH" : "POST", body: JSON.stringify({ ...form, gender: form.gender || undefined }),
+      });
       setForm(emptyProduct); setShowCreate(false); setSelectedId(product._id);
-      setPage(1); setRevision((value) => value + 1);
-      setSuccess("Đã tạo sản phẩm. Bạn có thể thêm biến thể bên dưới.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Không thể tạo sản phẩm."); }
+      if (!editingId) setPage(1);
+      setRevision((value) => value + 1);
+      setSuccess(editingId ? "Đã cập nhật sản phẩm." : "Đã tạo sản phẩm. Bạn có thể thêm ảnh và biến thể bên dưới.");
+      setEditingId("");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Không thể lưu sản phẩm."); }
     finally { setBusy(false); }
   }
 
@@ -68,8 +80,16 @@ export default function ProductVariantsManager({ request }: { request: AdminRequ
     <>
       <div className="admin-panel">
         <div className="admin-toolbar">
-          <div><h2>Biến thể sản phẩm</h2><p className="admin-muted">Chọn sản phẩm để quản lý size, màu, giá và tồn kho.</p></div>
-          <button className="admin-button" disabled={busy} onClick={() => setShowCreate(!showCreate)}>{showCreate ? "Đóng form" : "Tạo sản phẩm mới"}</button>
+          <div><h2>Sản phẩm và biến thể</h2><p className="admin-muted">Quản lý thông tin, ảnh, giá và tồn kho của cửa hàng.</p></div>
+          <div className="admin-actions">
+            <button className="admin-button" disabled={busy} onClick={() => { setForm(emptyProduct); setEditingId(""); setShowCreate(!showCreate); }}>{showCreate ? "Đóng form" : "Tạo sản phẩm mới"}</button>
+            {selected && !showCreate && <button disabled={busy || loading} onClick={() => {
+              const { name, slug, category_id, brand_id, description, status, is_featured, gender } = selected;
+              setForm({ name, slug, category_id, brand_id, description: description ?? "", status, is_featured, gender: gender && productGenders.includes(gender) ? gender : "" });
+              setEditingId(selected._id);
+              setShowCreate(true);
+            }}>Sửa sản phẩm</button>}
+          </div>
         </div>
         {error && <p className="admin-alert" role="alert">{error} <button onClick={() => setRevision((value) => value + 1)}>Tải lại</button></p>}
         {optionsError && <p className="admin-alert" role="alert">{optionsError} <button onClick={() => setRevision((value) => value + 1)}>Tải lại danh mục và thương hiệu</button></p>}
@@ -77,19 +97,22 @@ export default function ProductVariantsManager({ request }: { request: AdminRequ
         {showCreate && (
           <form onSubmit={createProduct}>
             <fieldset className="admin-form variant-fieldset" disabled={busy}>
-              <legend>Tạo sản phẩm để thêm biến thể</legend>
+              <legend>{editingId ? "Sửa sản phẩm" : "Tạo sản phẩm"}</legend>
               <label>Tên sản phẩm<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
               <label>Đường dẫn sản phẩm<input required placeholder="ao-thun-cotton" value={form.slug} onChange={(event) => setForm({ ...form, slug: event.target.value })} /></label>
               <label>Danh mục<select required value={form.category_id} onChange={(event) => setForm({ ...form, category_id: event.target.value })}><option value="">Chọn danh mục</option>{categories.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}</select></label>
               <label>Thương hiệu<select required value={form.brand_id} onChange={(event) => setForm({ ...form, brand_id: event.target.value })}><option value="">Chọn thương hiệu</option>{brands.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}</select></label>
+              <label>Nhóm khách hàng<select value={form.gender} onChange={(event) => setForm({ ...form, gender: event.target.value })}>{!form.gender && <option value="">Chưa phân loại</option>}{productGenders.map((gender) => <option key={gender}>{gender}</option>)}</select></label>
               <label className="wide">Mô tả<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-              <div className="admin-actions wide"><button className="admin-button" disabled={!categories.length || !brands.length}>{busy ? "Đang tạo..." : "Tạo sản phẩm"}</button></div>
+              <label>Hiển thị<select value={String(form.status)} onChange={(event) => setForm({ ...form, status: event.target.value === "true" })}><option value="true">Đang hiển thị</option><option value="false">Ẩn sản phẩm</option></select></label>
+              <label>Nổi bật<select value={String(form.is_featured)} onChange={(event) => setForm({ ...form, is_featured: event.target.value === "true" })}><option value="false">Bình thường</option><option value="true">Nổi bật</option></select></label>
+              <div className="admin-actions wide"><button className="admin-button" disabled={!categories.length || !brands.length}>{busy ? "Đang lưu..." : editingId ? "Lưu sản phẩm" : "Tạo sản phẩm"}</button></div>
               {(!categories.length || !brands.length) && <p className="admin-muted wide">Cần có danh mục và thương hiệu trước khi tạo sản phẩm.</p>}
             </fieldset>
           </form>
         )}
         <div className="admin-form variant-picker">
-          <label className="wide">Sản phẩm<select value={selectedId} disabled={loading || busy} onChange={(event) => { setSelectedId(event.target.value); setSuccess(""); }}>
+          <label className="wide">Sản phẩm<select value={selectedId} disabled={loading || busy || showCreate} onChange={(event) => { setSelectedId(event.target.value); setSuccess(""); }}>
             <option value="">{loading ? "Đang tải sản phẩm..." : "Chọn sản phẩm"}</option>
             {products.map((product) => <option key={product._id} value={product._id}>{product.name}{product.status ? "" : " (Đã tắt)"}</option>)}
           </select></label>
@@ -98,10 +121,11 @@ export default function ProductVariantsManager({ request }: { request: AdminRequ
         <div className="admin-actions variant-pagination">
           <button disabled={loading || busy || page === 1} onClick={() => setPage(page - 1)}>Trang trước</button>
           <span>Trang {page}</span>
-          <button disabled={loading || busy || products.length < 25} onClick={() => setPage(page + 1)}>Trang sau</button>
+          <button disabled={loading || busy || page >= totalPages} onClick={() => setPage(page + 1)}>Trang sau</button>
         </div>
       </div>
       {selected && !loading && <VariantEditor key={selected._id} product={selected} request={request} />}
+      {selected && !loading && <ProductImagesManager key={`images:${selected._id}`} productId={selected._id} request={request} />}
     </>
   );
 }

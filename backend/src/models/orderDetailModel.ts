@@ -2,7 +2,8 @@ import mongoose, { Document, Schema, Types } from "mongoose";
 
 export interface IOrderDetail extends Document {
   order_id: Types.ObjectId;
-  product_variant_id?: Types.ObjectId | null; // Có thể trống với sản phẩm demo chưa quản lý biến thể
+  product_id?: Types.ObjectId;
+  product_variant_id?: Types.ObjectId | null;
   storefront_product_id?: Types.ObjectId | null;
   outfit_id?: Types.ObjectId | null; // Đánh dấu để tính % combo
   product_name: string; // TÊN LÚC MUA
@@ -16,10 +17,12 @@ export interface IOrderDetail extends Document {
 const orderDetailSchema = new Schema<IOrderDetail>(
   {
     order_id: { type: Schema.Types.ObjectId, ref: "Order", required: true },
+    product_id: { type: Schema.Types.ObjectId, ref: "Product" },
     product_variant_id: {
       type: Schema.Types.ObjectId,
       ref: "ProductVariant",
       default: null,
+      required(this: IOrderDetail) { return !this.storefront_product_id; },
     },
     storefront_product_id: { type: Schema.Types.ObjectId, ref: "StorefrontProduct", default: null },
     outfit_id: { type: Schema.Types.ObjectId, ref: "Outfit", default: null },
@@ -34,6 +37,8 @@ const orderDetailSchema = new Schema<IOrderDetail>(
   },
   { timestamps: false },
 );
+
+orderDetailSchema.index({ order_id: 1 });
 
 const OrderDetail = mongoose.model<IOrderDetail>(
   "OrderDetail",

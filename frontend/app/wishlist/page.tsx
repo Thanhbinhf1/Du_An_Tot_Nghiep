@@ -3,11 +3,13 @@
 import Link from "next/link";
 import ProductCard from "@/components/product/ProductCard";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
-import { useWishlistIds } from "@/lib/storefront-demo";
+import { useWishlist } from "@/lib/wishlist";
+import { useDemoAuth } from "@/lib/demo-auth";
 
 export default function WishlistPage() {
-  const ids = useWishlistIds();
-  const { products } = useCatalogProducts();
+  const { ids, loading, error } = useWishlist();
+  const { products, loading: catalogLoading, error: catalogError } = useCatalogProducts();
+  const { token, isHydrated } = useDemoAuth();
   const savedProducts = products.filter((product) => ids.includes(product.id));
 
   return (
@@ -23,7 +25,10 @@ export default function WishlistPage() {
         </aside>
         <section className="account-page-content">
           <div className="catalog-heading"><div><div className="breadcrumb"><Link href="/">Trang chủ</Link> / Tài khoản</div><h1>Sản phẩm yêu thích</h1><p>{savedProducts.length} sản phẩm đã lưu</p></div><Link className="pill-button" href="/products">Khám phá sản phẩm</Link></div>
-          {savedProducts.length ? <div className="product-grid">{savedProducts.map((product) => <ProductCard key={product.id} product={product} />)}</div> : (
+          {isHydrated && !token && <p><Link href="/dang-nhap">Đăng nhập</Link> để lưu yêu thích trên nhiều thiết bị.</p>}
+          {(error || catalogError) && <p role="alert">{error || catalogError}</p>}
+          {!error && !catalogError && (loading || catalogLoading) && <p role="status">Đang tải sản phẩm yêu thích...</p>}
+          {savedProducts.length ? <div className="product-grid">{savedProducts.map((product) => <ProductCard key={product.id} product={product} />)}</div> : !loading && !catalogLoading && !error && !catalogError && (
             <div className="empty-state"><h2>Danh sách yêu thích đang trống</h2><p>Lưu sản phẩm bằng cách nhấn biểu tượng trái tim.</p><Link className="pill-button dark" href="/products">Xem sản phẩm</Link></div>
           )}
         </section>

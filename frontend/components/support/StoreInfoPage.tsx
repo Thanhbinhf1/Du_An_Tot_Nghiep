@@ -2,6 +2,8 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import { API_BASE_URL, readApiResponse } from "@/lib/api";
+import { useDemoAuth } from "@/lib/demo-auth";
 
 const content = {
   help: {
@@ -16,11 +18,10 @@ const content = {
   },
   shipping: {
     title: "Giao hàng",
-    intro: "Thông tin giao hàng áp dụng cho luồng cửa hàng demo.",
+    intro: "Đơn hàng được giao đến địa chỉ bạn chọn khi thanh toán.",
     sections: [
-      ["Thời gian giao hàng", "Đơn hàng demo hiển thị trạng thái ngay trên trang theo dõi. Thời gian giao hàng thật cần được xác nhận khi kết nối đơn vị vận chuyển."],
-      ["Phí giao hàng", "Giao hàng được minh họa miễn phí. Mức phí thật sẽ được tính theo địa chỉ và chính sách cửa hàng."],
-      ["Nhận tại cửa hàng", "Bạn có thể chọn cửa hàng nhận hàng trong trang thanh toán. Đây là lựa chọn mô phỏng."],
+      ["Theo dõi giao hàng", "Xem trạng thái xử lý và giao hàng trong mục Đơn hàng của tôi."],
+      ["Địa chỉ giao hàng", "Thêm hoặc cập nhật địa chỉ trong Sổ địa chỉ trước khi đặt hàng."],
     ],
   },
   returns: {
@@ -34,20 +35,19 @@ const content = {
   },
   privacy: {
     title: "Chính sách bảo mật",
-    intro: "Phiên bản này là giao diện demo; dữ liệu mẫu được lưu cục bộ trên trình duyệt.",
+    intro: "Thông tin tài khoản và dữ liệu mua hàng được lưu trong hệ thống cửa hàng.",
     sections: [
-      ["Dữ liệu demo", "Thông tin đăng nhập, giỏ hàng, yêu thích và đơn hàng demo được lưu trong bộ nhớ trình duyệt của thiết bị hiện tại."],
-      ["Không gửi dữ liệu", "Các biểu mẫu demo không gửi thông tin tới máy chủ hoặc bên thứ ba."],
-      ["Xóa dữ liệu", "Bạn có thể xóa dữ liệu demo bằng cách xóa dữ liệu trang web trong cài đặt trình duyệt."],
+      ["Dữ liệu tài khoản", "Hệ thống lưu thông tin hồ sơ, địa chỉ nhận hàng, giỏ hàng và đơn hàng theo tài khoản."],
+      ["Danh sách yêu thích", "Danh sách yêu thích đồng bộ theo tài khoản khi đăng nhập. Khách chưa đăng nhập lưu danh sách trên thiết bị hiện tại."],
+      ["Thanh toán trực tuyến", "Khi bạn chọn một cổng thanh toán trực tuyến, hệ thống gửi thông tin giao dịch cần thiết đến cổng đó."],
     ],
   },
   terms: {
     title: "Điều khoản sử dụng",
-    intro: "Website hiện là bản trình diễn frontend phục vụ mục đích phát triển và kiểm thử.",
+    intro: "Thông tin về sản phẩm và quy trình đặt hàng tại cửa hàng.",
     sections: [
-      ["Thông tin sản phẩm", "Giá, mô tả, tình trạng hàng và hình ảnh có thể là dữ liệu minh họa."],
-      ["Đơn hàng demo", "Việc đặt hàng trên website không tạo đơn hàng mua bán thật và không phát sinh thanh toán."],
-      ["Liên hệ", "Nếu cần hỗ trợ, vui lòng sử dụng biểu mẫu tại trang Liên hệ."],
+      ["Thông tin sản phẩm", "Giá và tình trạng hàng có thể khác nhau theo màu và kích cỡ. Hệ thống xác nhận lại khi đặt hàng."],
+      ["Đơn hàng", "Khi đặt hàng thành công, bạn có thể xem chi tiết và phương thức thanh toán trong mục Đơn hàng của tôi."],
     ],
   },
 };
@@ -65,23 +65,43 @@ export function StoreInfoPage({ page }: { page: keyof typeof content }) {
 }
 
 export function ContactPage() {
-  const [sent, setSent] = useState(false);
-  function submit(event: FormEvent<HTMLFormElement>) {
+  const { isHydrated } = useDemoAuth();
+  const [ticketId, setTicketId] = useState("");
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSent(true);
-    event.currentTarget.reset();
+    if (sending) return;
+    const form = event.currentTarget;
+    setSending(true);
+    setError("");
+    setTicketId("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/contact`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+      });
+      const ticket = await readApiResponse<{ id: string }>(response);
+      setTicketId(ticket.id);
+      form.reset();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Không thể gửi yêu cầu liên hệ.");
+    } finally {
+      setSending(false);
+    }
   }
   return (
     <section className="info-page">
       <div className="breadcrumb"><Link href="/">Trang chủ</Link> / Liên hệ</div>
-      <h1>Liên hệ hỗ trợ</h1><p className="info-intro">Gửi câu hỏi cho nhóm chăm sóc khách hàng demo.</p>
-      <form className="settings-card contact-form" onSubmit={submit}>
-        <label className="form-field">Họ và tên<input autoComplete="name" required /></label>
-        <label className="form-field">Email<input type="email" autoComplete="email" required /></label>
-        <label className="form-field">Chủ đề<select defaultValue="don-hang"><option value="don-hang">Đơn hàng</option><option value="san-pham">Sản phẩm</option><option value="doi-tra">Đổi trả</option><option value="khac">Khác</option></select></label>
-        <label className="form-field">Nội dung<textarea rows={5} required /></label>
-        <button className="pill-button dark" type="submit">Gửi yêu cầu</button>
-        {sent && <p role="status" className="settings-success">Yêu cầu demo đã được ghi nhận trên trang này; chưa gửi tới máy chủ.</p>}
+      <h1>Liên hệ hỗ trợ</h1><p className="info-intro">Gửi câu hỏi cho nhóm chăm sóc khách hàng.</p>
+      <form className="settings-card contact-form" method="post" onSubmit={submit}>
+        <label className="form-field">Họ và tên<input name="name" autoComplete="name" maxLength={120} required /></label>
+        <label className="form-field">Email<input name="email" type="email" autoComplete="email" maxLength={254} required /></label>
+        <label className="form-field">Chủ đề<select name="topic" defaultValue="don-hang"><option value="don-hang">Đơn hàng</option><option value="san-pham">Sản phẩm</option><option value="doi-tra">Đổi trả</option><option value="khac">Khác</option></select></label>
+        <label className="form-field">Nội dung<textarea name="message" rows={5} maxLength={3000} required /></label>
+        <button className="pill-button dark" type="submit" disabled={!isHydrated || sending}>{sending ? "Đang gửi..." : "Gửi yêu cầu"}</button>
+        {error && <p role="alert" className="form-error">{error}</p>}
+        {ticketId && <p role="status" className="settings-success">Đã gửi yêu cầu. Mã liên hệ {ticketId}.</p>}
       </form>
     </section>
   );

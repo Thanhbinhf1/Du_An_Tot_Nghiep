@@ -1,5 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
+import { isObjectIdOrHexString, type Types } from "mongoose";
 import ProductComment from "../models/productCommentModel.js";
+import Order from "../models/orderModel.js";
+import OrderDetail from "../models/orderDetailModel.js";
+import Product from "../models/productModel.js";
+import ProductVariant from "../models/productVariantModel.js";
 import type { AuthRequest } from "../middlewares/authMiddleware.js";
 import { AppError } from "../middlewares/AppError.js";
 
@@ -8,7 +13,25 @@ function productKeyFromRequest(req: Request) {
   if (typeof productKey !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(productKey)) {
     throw new AppError("Mã sản phẩm không hợp lệ.", 400);
   }
-  return productKey;
+  return isObjectIdOrHexString(productKey) ? productKey.toLowerCase() : productKey;
+}
+
+async function hasCompletedPurchase(productKey: string, userId: Types.ObjectId) {
+  if (!isObjectIdOrHexString(productKey)) return false;
+  const [product, orders] = await Promise.all([
+    Product.exists({ _id: productKey, status: true }),
+    Order.find({ user_id: userId, order_status: "completed" }).select("_id").lean(),
+  ]);
+  if (!product || !orders.length) return false;
+
+  const variants = await ProductVariant.find({ product_id: productKey }).select("_id").lean();
+  return Boolean(await OrderDetail.exists({
+    order_id: { $in: orders.map((order) => order._id) },
+    $or: [
+      { product_id: productKey },
+      { product_id: null, product_variant_id: { $in: variants.map((variant) => variant._id) } },
+    ],
+  }));
 }
 
 export class ProductCommentController {
@@ -35,6 +58,21 @@ export class ProductCommentController {
     }
   }
 
+  static async getEligibility(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError("Vui lòng đăng nhập để đánh giá sản phẩm.", 401);
+      const productKey = productKeyFromRequest(req);
+      const [canReview, ownReview] = await Promise.all([
+        hasCompletedPurchase(productKey, req.user._id),
+        ProductComment.findOne({ product_key: productKey, user_email: req.user.email })
+          .select("rating comment").lean(),
+      ]);
+      res.json({ status: "success", data: { canReview, ownReview } });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async saveForProduct(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const productKey = productKeyFromRequest(req);
@@ -47,6 +85,9 @@ export class ProductCommentController {
       }
       if (typeof comment !== "string" || !comment.trim() || comment.trim().length > 1000) {
         throw new AppError("Nhận xét phải có nội dung và không quá 1000 ký tự.", 400);
+      }
+      if (!(await hasCompletedPurchase(productKey, req.user._id))) {
+        throw new AppError("Bạn có thể đánh giá sản phẩm sau khi đơn hàng đã giao thành công.", 403);
       }
 
       const saved = await ProductComment.findOneAndUpdate(
@@ -62,7 +103,7 @@ export class ProductCommentController {
             user_email: req.user.email,
           },
         },
-        { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true },
+        { returnDocument: "after", upsert: true, runValidators: true, setDefaultsOnInsert: true },
       ).select("-user_email");
 
       res.status(200).json({ status: "success", data: saved });
