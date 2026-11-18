@@ -2,17 +2,40 @@ import type { Response, NextFunction } from "express";
 import mongoose from "mongoose";
 import type { IOrder } from "../models/orderModel.js";
 import Order from "../models/orderModel.js";
-import OrderDetail from "../models/orderDetailModel.js";
+import OrderDetail, { type IOrderDetail } from "../models/orderDetailModel.js";
 import Address from "../models/addressModel.js";
 import Cart from "../models/cartModel.js";
 import CartDetail from "../models/cartDetailModel.js";
+import Coupon from "../models/couponModel.js";
 import ProductVariant from "../models/productVariantModel.js";
 import Product from "../models/productModel.js";
 import OrderStatusHistory from "../models/orderStatusHistoryModel.js";
 import { AppError } from "../middlewares/AppError.js";
 import type { AuthRequest } from "../middlewares/authMiddleware.js";
+import { isPaymentMethodConfigured } from "../config/paymentMethods.js";
+import { calculateCheckoutPrice, readCheckoutOptions, restoreCouponUse } from "../services/checkoutPricing.js";
 
 export class OrderController {
+  static async quoteCheckout(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError("Bạn chưa đăng nhập.", 401);
+      const options = readCheckoutOptions(req.body ?? {});
+      const cart = await Cart.findOne({ user_id: req.user._id }).select("_id").lean();
+      const items = cart ? await CartDetail.find({ cart_id: cart._id })
+        .populate<{ product_variant_id: Pick<InstanceType<typeof ProductVariant>, "price" | "sale_price"> | null }>(
+          "product_variant_id", "price sale_price",
+        ).lean() : [];
+      const subtotal = items.reduce((sum, item) => {
+        const variant = item.product_variant_id;
+        return sum + (variant ? (variant.sale_price ?? variant.price) * item.quantity : 0);
+      }, 0);
+      const { couponId: _couponId, ...price } = await calculateCheckoutPrice(subtotal, options);
+      res.json({ status: "success", data: price });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // GET /api/orders/my
   static async getMyOrders(
     req: AuthRequest,
@@ -71,16 +94,39 @@ export class OrderController {
         order_id: order._id,
       }).lean();
 
+      const orderItems = order.order_status === "completed"
+        ? await OrderController.addReviewProducts(items)
+        : items;
+
       return res.status(200).json({
         status: "success",
         data: {
           ...order,
-          items,
+          items: orderItems,
         },
       });
     } catch (error) {
       next(error);
     }
+  }
+
+  private static async addReviewProducts<Item extends Pick<IOrderDetail, "product_id" | "product_variant_id">>(items: Item[]) {
+    if (!items.length) return [];
+    const legacyVariantIds = items
+      .filter((item) => !item.product_id)
+      .map((item) => item.product_variant_id);
+    const variants = legacyVariantIds.length
+      ? await ProductVariant.find({ _id: { $in: legacyVariantIds } }).select("product_id").lean()
+      : [];
+    const legacyProducts = new Map(variants.map((variant) => [String(variant._id), variant.product_id]));
+    const productIds = items.map((item) => item.product_id ?? legacyProducts.get(String(item.product_variant_id)));
+    const products = await Product.find({ _id: { $in: productIds.filter((id) => id !== undefined) }, status: true })
+      .select("_id").lean();
+    const visibleProducts = new Set(products.map((product) => String(product._id)));
+    return items.map((item, index) => ({
+      ...item,
+      review_product_id: visibleProducts.has(String(productIds[index])) ? productIds[index] : null,
+    }));
   }
 
   // POST /api/orders - Tạo đơn COD từ giỏ hàng
@@ -95,7 +141,11 @@ export class OrderController {
       }
 
       const userId = req.user._id;
-      const { address_id, payment_method, note } = req.body ?? {};
+      const { address_id, payment_method, note, expected_total } = req.body ?? {};
+      const options = readCheckoutOptions(req.body ?? {});
+      if (expected_total !== undefined && (!Number.isSafeInteger(expected_total) || expected_total < 0)) {
+        throw new AppError("Tổng tiền xác nhận không hợp lệ.", 400);
+      }
 
       if (
         typeof address_id !== "string" ||
@@ -111,6 +161,10 @@ export class OrderController {
         payment_method !== "MoMo"
       ) {
         throw new AppError("Phương thức thanh toán không hợp lệ", 400);
+      }
+
+      if (!isPaymentMethodConfigured(payment_method)) {
+        throw new AppError("Phương thức thanh toán chưa sẵn sàng.", 409);
       }
 
       if (
@@ -150,6 +204,7 @@ export class OrderController {
 
         const orderItems: Array<{
           product_variant_id: mongoose.Types.ObjectId;
+          product_id: mongoose.Types.ObjectId;
           outfit_id: null;
           product_name: string;
           sku: string;
@@ -212,6 +267,7 @@ export class OrderController {
 
           orderItems.push({
             product_variant_id: variant._id,
+            product_id: product._id,
             outfit_id: null,
             product_name: product.name,
             sku: variant.sku,
@@ -220,6 +276,20 @@ export class OrderController {
             quantity: item.quantity,
             price_at_buy: price,
           });
+        }
+
+        const price = await calculateCheckoutPrice(totalAmount, options, session);
+        if (expected_total !== undefined && price.final_amount !== expected_total) {
+          throw new AppError("Tổng tiền đã thay đổi. Vui lòng kiểm tra lại trước khi đặt đơn.", 409);
+        }
+        if (price.final_amount === 0 && payment_method !== "COD") {
+          throw new AppError("Vui lòng chọn COD cho đơn hàng có tổng tiền bằng 0.", 400);
+        }
+        if (payment_method === "MoMo" && (price.final_amount < 1_000 || price.final_amount > 50_000_000)) {
+          throw new AppError("MoMo không hỗ trợ tổng tiền đơn hàng này.", 400);
+        }
+        if (price.couponId) {
+          await Coupon.updateOne({ _id: price.couponId }, { $inc: { used_count: 1 } }, { session });
         }
 
         // 4. Trừ tồn kho có điều kiện
@@ -249,18 +319,19 @@ export class OrderController {
           address.ward,
           address.district,
           address.province,
-        ].join(", ");
+        ].filter(Boolean).join(", ");
 
         const order = new Order({
           user_id: userId,
-          total_product_amount: totalAmount,
-          discount_amount: 0,
-          shipping_fee: 0,
-          final_amount: totalAmount,
+          coupon_id: price.couponId,
+          total_product_amount: price.total_product_amount,
+          discount_amount: price.discount_amount,
+          shipping_fee: price.shipping_fee,
+          final_amount: price.final_amount,
           receiver_name: address.receiver_name,
           receiver_phone: address.receiver_phone,
           shipping_address: shippingAddress,
-          shipping_method: "Standard",
+          shipping_method: options.method,
           payment_method,
           payment_status: "pending",
           order_status: "pending",
@@ -293,8 +364,8 @@ export class OrderController {
 
         return {
           order_id: order._id,
-          total_amount: totalAmount,
-          total_items: orderItems.length,
+          total_amount: price.final_amount,
+          total_items: orderItems.reduce((sum, item) => sum + item.quantity, 0),
           payment_method,
           payment_status: "pending",
           order_status: "pending",
@@ -424,6 +495,8 @@ export class OrderController {
             throw new AppError("Không tìm thấy biến thể để hoàn kho", 409);
           }
         }
+
+        await restoreCouponUse(updatedOrder.coupon_id, session);
 
         // 6. Ghi lịch sử hủy đơn
         await OrderStatusHistory.create(
@@ -593,6 +666,10 @@ export class OrderController {
               `Không thể chuyển từ ${order.order_status} sang ${status}`,
               409,
             );
+          }
+
+          if (order.payment_method !== "COD" && order.payment_status !== "success") {
+            throw new AppError("Cần xác nhận thanh toán trước khi xử lý đơn hàng.", 409);
           }
 
           // Cập nhật có điều kiện để tránh ghi đè trạng thái.

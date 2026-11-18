@@ -8,6 +8,7 @@ router.use(protect);
 
 // Khách hàng
 router.get("/my", OrderController.getMyOrders);
+router.post("/quote", OrderController.quoteCheckout);
 router.post("/", OrderController.createOrder);
 router.patch("/:id/cancel", OrderController.cancelOrder);
 

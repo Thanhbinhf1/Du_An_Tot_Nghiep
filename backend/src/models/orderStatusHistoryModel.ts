@@ -4,7 +4,7 @@ export interface IOrderStatusHistory extends Document {
   order_id: Types.ObjectId;
   status: "pending" | "processing" | "shipping" | "completed" | "cancelled";
   note: string;
-  changed_by: Types.ObjectId; // Bắt buộc lưu Admin/Staff nào đã chuyển trạng thái
+  changed_by?: Types.ObjectId;
   created_at: Date;
 }
 
@@ -17,7 +17,7 @@ const orderStatusHistorySchema = new Schema<IOrderStatusHistory>(
       required: true,
     },
     note: { type: String, default: "" },
-    changed_by: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    changed_by: { type: Schema.Types.ObjectId, ref: "User" },
   },
   {
     timestamps: { createdAt: "created_at", updatedAt: false }, // Chỉ cần thời gian tạo lịch sử

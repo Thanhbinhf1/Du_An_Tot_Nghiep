@@ -1,10 +1,10 @@
-import { OrderConfirmation } from "@/components/orders/OrderViews";
+import { redirect } from "next/navigation";
 
 export default async function OrderConfirmationPage({
   searchParams,
 }: {
   searchParams: Promise<{ id?: string }>;
 }) {
-  const { id = "" } = await searchParams;
-  return <div className="container"><OrderConfirmation orderId={id} /></div>;
+  const { id } = await searchParams;
+  redirect(id ? `/orders/${encodeURIComponent(id)}` : "/orders");
 }

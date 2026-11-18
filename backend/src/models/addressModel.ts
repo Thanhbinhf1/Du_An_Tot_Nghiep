@@ -10,6 +10,8 @@ export interface IAddress extends Document {
   province: string;
   district: string;
   ward: string;
+  province_code?: number;
+  ward_code?: number;
   address_detail: string;
   is_default: boolean;
   created_at: Date;
@@ -36,22 +38,24 @@ const addressSchema = new Schema<IAddress>(
       required: [true, "Vui lòng nhập số điện thoại"],
       trim: true,
       match: [
-        /^(84|0[35789])[0-9]{8}$/,
+        /^(?:0|84)[35789][0-9]{8}$/,
         "Số điện thoại người nhận không hợp lệ",
       ],
     },
     province: {
       type: String,
-      required: [true, "Vui lòng chọn tỉnh/thành phố"], // Dùng API ngoài, chỉ lưu chuỗi
+      required: [true, "Vui lòng chọn tỉnh/thành phố"],
     },
     district: {
       type: String,
-      required: [true, "Vui lòng chọn quận/huyện"],
+      default: "",
     },
     ward: {
       type: String,
       required: [true, "Vui lòng chọn phường/xã"],
     },
+    province_code: { type: Number },
+    ward_code: { type: Number },
     address_detail: {
       type: String,
       required: [true, "Vui lòng nhập địa chỉ cụ thể (số nhà, đường...)"],

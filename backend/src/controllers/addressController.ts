@@ -4,13 +4,11 @@ import mongoose from "mongoose";
 import Address from "../models/addressModel.js";
 import { AppError } from "../middlewares/AppError.js";
 import type { AuthRequest } from "../middlewares/authMiddleware.js";
+import { resolveAddressLocation } from "../services/addressLocations.js";
 
 const addressFields = [
   "receiver_name",
   "receiver_phone",
-  "province",
-  "district",
-  "ward",
   "address_detail",
 ] as const;
 
@@ -37,7 +35,7 @@ function getAddressId(req: AuthRequest) {
 function validateAddressFields(
   body: unknown,
   requireAll: boolean,
-): Partial<Record<AddressField, string>> {
+) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new AppError("Dữ liệu địa chỉ không hợp lệ", 400);
   }
@@ -52,21 +50,26 @@ function validateAddressFields(
       continue;
     }
 
-    if (typeof value !== "string" || !value.trim()) {
+    if (typeof value !== "string" || !value.trim() || value.trim().length > (field === "address_detail" ? 250 : field === "receiver_name" ? 120 : 24)) {
       throw new AppError(`Trường ${field} không hợp lệ`, 400);
     }
 
-    result[field] = value.trim();
+    result[field] = field === "receiver_phone" ? value.trim().replace(/^\+84/, "0").replace(/[ .-]/g, "") : value.trim();
   }
 
   if (
     result.receiver_phone !== undefined &&
-    !/^(84|0[35789])[0-9]{8}$/.test(result.receiver_phone)
+    !/^(?:0|84)[35789][0-9]{8}$/.test(result.receiver_phone)
   ) {
     throw new AppError("Số điện thoại không hợp lệ", 400);
   }
 
-  return result;
+  const locationRequested = requireAll || ["province_code", "ward_code", "province", "district", "ward"]
+    .some((field) => Object.hasOwn(input, field));
+  return {
+    ...result,
+    ...(locationRequested ? resolveAddressLocation(input.province_code, input.ward_code) : {}),
+  };
 }
 
 export class AddressController {

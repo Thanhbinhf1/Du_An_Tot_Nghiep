@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getMoMoConfig } from "../config/momoConfig.js";
+import { AppError } from "../middlewares/AppError.js";
 
 function signMoMo(content: string, secretKey: string): string {
   return crypto
@@ -81,11 +82,19 @@ export async function createMoMoPayment(input: CreateMoMoInput) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => {
+    throw new AppError("MoMo chưa phản hồi. Bạn có thể thử lại thanh toán trên đơn này.", 502);
   });
 
+  if (response.status === 422) {
+    const result = await response.json().catch(() => null);
+    if (result?.resultCode === 7000) {
+      throw new AppError("MoMo đang xử lý yêu cầu. Vui lòng chờ một chút rồi thử lại.", 409);
+    }
+  }
   if (!response.ok) {
-    throw new Error(`MoMo Sandbox HTTP ${response.status}`);
+    throw new AppError("MoMo chưa nhận yêu cầu thanh toán. Bạn có thể thử lại trên đơn này.", 502);
   }
 
   const data: unknown = await response.json();

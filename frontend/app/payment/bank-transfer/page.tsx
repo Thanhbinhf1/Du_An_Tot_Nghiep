@@ -48,7 +48,7 @@ function BankTransferContent() {
     typeof orderId === "string" && /^[a-fA-F0-9]{24}$/.test(orderId);
 
   return (
-    <main
+    <section
       className="container"
       style={{ maxWidth: 650, paddingTop: 50, paddingBottom: 60 }}
     >
@@ -136,7 +136,7 @@ function BankTransferContent() {
       <p style={{ marginTop: 28 }}>
         <Link href="/orders">Xem đơn hàng của tôi</Link>
       </p>
-    </main>
+    </section>
   );
 }
 

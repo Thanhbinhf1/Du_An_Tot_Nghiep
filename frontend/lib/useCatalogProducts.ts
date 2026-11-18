@@ -1,32 +1,39 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { products as sampleProducts } from "@/data/products";
-import { API_BASE_URL, mapApiProduct, readApiResponse, type ApiProduct } from "@/lib/api";
+import { API_BASE_URL, mapApiProduct, readApiEnvelope, type ApiProduct } from "@/lib/api";
 import type { Product } from "@/types/product";
 
 export function useCatalogProducts() {
-  const [products, setProducts] = useState<Product[]>(sampleProducts);
-  const [error, setError] = useState("");
+  const [result, setResult] = useState<{ products: Product[]; error: string }>();
 
   useEffect(() => {
-    let active = true;
-    fetch(`${API_BASE_URL}/catalog/products`)
-      .then(readApiResponse<ApiProduct[]>)
-      .then((result) => {
-        if (!active) return;
-        const catalogProducts = result.map(mapApiProduct);
-        const localShowcaseProducts = sampleProducts.filter((product) =>
-          product.id.includes("-featured-"),
-        );
-        setProducts([...catalogProducts, ...localShowcaseProducts]);
-        setError("");
-      })
-      .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : "Không thể tải sản phẩm.");
-      });
-    return () => { active = false; };
+    const controller = new AbortController();
+
+    async function loadProducts() {
+      const products: Product[] = [];
+      let page = 1;
+      let totalPages: number;
+      do {
+        const response = await fetch(`${API_BASE_URL}/products?view=storefront&limit=100&page=${page}`, {
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        const { data: items, pagination } = await readApiEnvelope<ApiProduct[]>(response);
+        products.push(...items.map(mapApiProduct));
+        totalPages = pagination?.totalPages ?? 1;
+        page += 1;
+      } while (page <= totalPages);
+      if (!controller.signal.aborted) setResult({ products, error: "" });
+    }
+
+    void loadProducts().catch((cause: unknown) => {
+      if (!controller.signal.aborted) {
+        setResult({ products: [], error: cause instanceof Error ? cause.message : "Không thể tải sản phẩm." });
+      }
+    });
+    return () => controller.abort();
   }, []);
 
-  return { products, error };
+  return { products: result?.products ?? [], error: result?.error ?? "", loading: !result };
 }

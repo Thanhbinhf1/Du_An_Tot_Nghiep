@@ -125,7 +125,7 @@ export async function queryVNPayTransaction(input: {
     params.vnp_OrderInfo,
   ].join("|");
 
-  const response = await fetch(QUERY_URL, {
+  const response = await fetch(process.env.VNP_API_URL || QUERY_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -5,6 +5,7 @@ import OrderDetail from "../models/orderDetailModel.js";
 import Payment from "../models/paymentModel.js";
 import ProductVariant from "../models/productVariantModel.js";
 import OrderStatusHistory from "../models/orderStatusHistoryModel.js";
+import { restoreCouponUse } from "./checkoutPricing.js";
 
 type FailureResult =
   | "cancelled_and_restored"
@@ -15,18 +16,32 @@ export async function applyVerifiedVNPayFailure(input: {
   paymentId: Types.ObjectId;
   adminId: Types.ObjectId;
 }): Promise<FailureResult> {
+  return applyVerifiedPaymentFailure({
+    paymentId: input.paymentId,
+    method: "VNPay",
+    note: "Admin đối soát VNPay: giao dịch thất bại",
+    changedBy: input.adminId,
+  });
+}
+
+export async function applyVerifiedPaymentFailure(input: {
+  paymentId: Types.ObjectId;
+  method: "MoMo" | "VNPay";
+  note: string;
+  changedBy?: Types.ObjectId;
+}): Promise<FailureResult> {
   return mongoose.connection.transaction(async (session) => {
     // 1. Tìm Payment
     const payment = await Payment.findById(input.paymentId).session(session);
 
-    if (!payment || payment.payment_method !== "VNPay") {
+    if (!payment || payment.payment_method !== input.method) {
       return "conflict";
     }
 
     // 2. Tìm Order
     const order = await Order.findById(payment.order_id).session(session);
 
-    if (!order || order.payment_method !== "VNPay") {
+    if (!order || order.payment_method !== input.method) {
       return "conflict";
     }
 
@@ -84,7 +99,7 @@ export async function applyVerifiedVNPayFailure(input: {
     const updatedOrder = await Order.findOneAndUpdate(
       {
         _id: order._id,
-        payment_method: "VNPay",
+        payment_method: input.method,
         payment_status: "pending",
         order_status: "pending",
       },
@@ -109,7 +124,7 @@ export async function applyVerifiedVNPayFailure(input: {
     const updatedPayment = await Payment.findOneAndUpdate(
       {
         _id: payment._id,
-        payment_method: "VNPay",
+        payment_method: input.method,
         status: "pending",
       },
       {
@@ -145,14 +160,16 @@ export async function applyVerifiedVNPayFailure(input: {
       }
     }
 
+    await restoreCouponUse(order.coupon_id, session);
+
     // 8. Ghi lịch sử hủy đơn
     await OrderStatusHistory.create(
       [
         {
           order_id: order._id,
-          status: "cancelled",
-          note: "Admin đối soát VNPay: giao dịch thất bại",
-          changed_by: input.adminId,
+          status: "cancelled" as const,
+          note: input.note,
+          ...(input.changedBy ? { changed_by: input.changedBy } : {}),
         },
       ],
       { session },

@@ -2,8 +2,12 @@ import type { Request, Response, NextFunction } from "express";
 import mongoose from "mongoose";
 
 import Product from "../models/productModel.js";
+import Category from "../models/categoryModel.js";
+import Brand from "../models/brandModel.js";
 import ProductImage from "../models/productImageModel.js";
 import ProductVariant from "../models/productVariantModel.js";
+import ProductComment from "../models/productCommentModel.js";
+import { productGenders, productAudiences } from "../services/catalogAudience.js";
 
 // GET /api/products/admin - Dữ liệu quản trị, gồm cả sản phẩm đã tắt.
 export const getAdminProducts = async (req: Request, res: Response, next: NextFunction) => {
@@ -66,12 +70,57 @@ export const getProducts = async (
       Product.find(filter)
         .populate("category_id", "name slug")
         .populate("brand_id", "name slug")
-        .sort({ created_at: -1 })
+        .sort(req.query.view === "storefront"
+          ? { is_featured: -1, created_at: -1, _id: -1 }
+          : { created_at: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
       Product.countDocuments(filter),
     ]);
+
+    if (req.query.view === "storefront") {
+      const ids = products.map((product) => product._id);
+      const [images, variants, ratings] = await Promise.all([
+        ProductImage.find({ product_id: { $in: ids } })
+          .sort({ is_primary: -1, display_order: 1, _id: 1 })
+          .lean(),
+        ProductVariant.find({ product_id: { $in: ids }, status: true })
+          .sort({ _id: 1 })
+          .lean(),
+        ProductComment.aggregate<{ _id: string; average: number }>([
+          { $match: { product_key: { $in: ids.map(String) } } },
+          { $group: { _id: "$product_key", average: { $avg: "$rating" } } },
+        ]),
+      ]);
+      const averageByProduct = new Map(ratings.map((rating) => [rating._id, rating.average]));
+      const primaryImages = new Map<string, (typeof images)[number]>();
+      for (const image of images) {
+        const id = String(image.product_id);
+        if (!primaryImages.has(id)) primaryImages.set(id, image);
+      }
+      const variantsByProduct = new Map<string, typeof variants>();
+      for (const variant of variants) {
+        const id = String(variant.product_id);
+        const group = variantsByProduct.get(id) ?? [];
+        group.push(variant);
+        variantsByProduct.set(id, group);
+      }
+      return res.json({
+        data: products.map((product) => {
+          const id = String(product._id);
+          const image = primaryImages.get(id);
+          return {
+            ...product,
+            audiences: productAudiences(product.gender),
+            images: image ? [image] : [],
+            variants: variantsByProduct.get(id) ?? [],
+            average_rating: averageByProduct.get(id) ?? 0,
+          };
+        }),
+        pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      });
+    }
 
     return res.status(200).json({
       message: "Lấy danh sách sản phẩm thành công",
@@ -115,14 +164,18 @@ export const getProductById = async (
       return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
     }
 
-    const [images, variants] = await Promise.all([
+    const [images, variants, ratings] = await Promise.all([
       ProductImage.find({ product_id: product._id })
         .sort({ display_order: 1 })
         .lean(),
       ProductVariant.find({
         product_id: product._id,
         status: true,
-      }).lean(),
+      }).sort({ _id: 1 }).lean(),
+      ProductComment.aggregate<{ average: number; total: number }>([
+        { $match: { product_key: String(product._id) } },
+        { $group: { _id: null, average: { $avg: "$rating" }, total: { $sum: 1 } } },
+      ]),
     ]);
 
     return res.status(200).json({
@@ -131,6 +184,8 @@ export const getProductById = async (
         ...product,
         images,
         variants,
+        average_rating: ratings[0]?.average ?? 0,
+        review_count: ratings[0]?.total ?? 0,
       },
     });
   } catch (error) {
@@ -151,11 +206,15 @@ export const createProduct = async (
       name,
       slug,
       description,
+      gender,
       is_featured,
       status,
-    } = req.body;
+    } = req.body ?? {};
+    if (gender !== undefined && !productGenders.some((value) => value === gender)) {
+      return res.status(400).json({ message: "Nhóm khách hàng không hợp lệ." });
+    }
 
-    if (!category_id || !brand_id || !name?.trim() || !slug?.trim()) {
+    if (!category_id || !brand_id || typeof name !== "string" || !name.trim() || typeof slug !== "string" || !slug.trim()) {
       return res.status(400).json({
         message: "Vui lòng nhập category_id, brand_id, name và slug",
       });
@@ -168,6 +227,11 @@ export const createProduct = async (
       return res.status(400).json({
         message: "category_id hoặc brand_id không hợp lệ",
       });
+    }
+
+    const [category, brand] = await Promise.all([Category.exists({ _id: category_id }), Brand.exists({ _id: brand_id })]);
+    if (!category || !brand) {
+      return res.status(404).json({ message: "Danh mục hoặc thương hiệu không tồn tại" });
     }
 
     const normalizedSlug = slug.trim().toLowerCase();
@@ -186,6 +250,7 @@ export const createProduct = async (
       name: name.trim(),
       slug: normalizedSlug,
       description,
+      gender,
       is_featured,
       status,
     });
@@ -219,6 +284,7 @@ export const updateProduct = async (
       "name",
       "slug",
       "description",
+      "gender",
       "is_featured",
       "status",
     ];
@@ -229,6 +295,9 @@ export const updateProduct = async (
       if (req.body[field] !== undefined) {
         updates[field] = req.body[field];
       }
+    }
+    if (updates.gender !== undefined && !productGenders.some((value) => value === updates.gender)) {
+      return res.status(400).json({ message: "Nhóm khách hàng không hợp lệ." });
     }
 
     if (typeof updates.name === "string") {
@@ -257,6 +326,14 @@ export const updateProduct = async (
           message: `${field} không hợp lệ`,
         });
       }
+    }
+
+    const [category, brand] = await Promise.all([
+      updates.category_id === undefined || Category.exists({ _id: updates.category_id }),
+      updates.brand_id === undefined || Brand.exists({ _id: updates.brand_id }),
+    ]);
+    if (!category || !brand) {
+      return res.status(404).json({ message: "Danh mục hoặc thương hiệu không tồn tại" });
     }
 
     const product = await Product.findByIdAndUpdate(id, updates, {

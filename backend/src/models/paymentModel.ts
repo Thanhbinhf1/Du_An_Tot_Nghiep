@@ -61,5 +61,10 @@ paymentSchema.index(
     },
   },
 );
+paymentSchema.index({ transaction_id: 1 }, {
+  unique: true,
+  partialFilterExpression: { payment_method: "BankTransfer", status: "success", transaction_id: { $gt: "" } },
+  name: "unique_bank_transfer_transaction",
+});
 const Payment = mongoose.model<IPayment>("Payment", paymentSchema);
 export default Payment;

@@ -6,10 +6,13 @@ export interface IUser extends Document {
   name: string;
   email: string;
   password?: string;
+  session_version: number;
+  wishlist?: mongoose.Types.ObjectId[];
   phone?: string;
   role: UserRole;
   is_blocked: boolean;
   auth_provider: "local" | "google";
+  google_sub?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -25,6 +28,8 @@ const userSchema = new Schema<IUser>(
       trim: true,
     },
     password: { type: String, select: false },
+    session_version: { type: Number, default: 0 },
+    wishlist: { type: [Schema.Types.ObjectId], default: [], select: false },
     phone: { type: String },
     role: {
       type: String,
@@ -37,6 +42,7 @@ const userSchema = new Schema<IUser>(
       enum: ["local", "google"],
       default: "local",
     },
+    google_sub: { type: String, unique: true, sparse: true, select: false },
   },
   { timestamps: true },
 );

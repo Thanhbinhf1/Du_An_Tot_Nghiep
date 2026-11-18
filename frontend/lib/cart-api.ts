@@ -1,5 +1,25 @@
 import { API_BASE_URL, authenticatedHeaders, readApiResponse } from "./api";
 
+export const cartChangedEvent = "bapd-cart-api-change";
+export const cartToastEvent = "bapd-cart-toast";
+
+export interface CartToastDetail {
+  message: string;
+  quantity?: number;
+}
+
+export function notifyCartChanged() {
+  window.dispatchEvent(new Event(cartChangedEvent));
+}
+
+export function notifyCartToast(message = "Đã thêm sản phẩm vào giỏ hàng!", quantity?: number) {
+  window.dispatchEvent(
+    new CustomEvent<CartToastDetail>(cartToastEvent, {
+      detail: { message, quantity },
+    }),
+  );
+}
+
 export interface CartItem {
   _id: string;
   cart_id: string;
@@ -33,7 +53,10 @@ export async function addCartItem(
     }),
   });
 
-  return readApiResponse<CartItem>(response);
+  const item = await readApiResponse<CartItem>(response);
+  notifyCartChanged();
+  notifyCartToast(`Đã thêm ${quantity} sản phẩm vào giỏ hàng!`, quantity);
+  return item;
 }
 
 export interface ProductVariant {
@@ -116,6 +139,7 @@ export async function updateBackendCartItem(
   );
 
   await readApiResponse<BackendCartItem>(response);
+  notifyCartChanged();
 }
 
 // DELETE /api/cart/items/:itemId
@@ -136,4 +160,19 @@ export async function deleteBackendCartItem(
 
     throw new Error(result?.message ?? "Không thể xóa sản phẩm.");
   }
+  notifyCartChanged();
+}
+
+// DELETE /api/cart
+export async function clearBackendCart(token: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/cart`, {
+    method: "DELETE",
+    headers: authenticatedHeaders(token),
+  });
+
+  if (!response.ok) {
+    const result = await response.json().catch(() => null);
+    throw new Error(result?.message ?? "Không thể xóa giỏ hàng.");
+  }
+  notifyCartChanged();
 }

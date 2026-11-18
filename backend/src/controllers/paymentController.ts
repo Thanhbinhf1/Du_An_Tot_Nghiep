@@ -10,11 +10,12 @@ import { getVNPayConfig } from "../config/vnpayConfig.js";
 import Payment from "../models/paymentModel.js";
 import Order from "../models/orderModel.js";
 import { getBankConfig } from "../config/bankConfig.js";
+import { getPaymentResultPage } from "../config/paymentMethods.js";
 import { AppError } from "../middlewares/AppError.js";
 import type { AuthRequest } from "../middlewares/authMiddleware.js";
 import { queryVNPayTransaction } from "../services/vnpayQueryService.js";
 import { confirmVNPaySuccess } from "../services/vnpaySettlementService.js";
-import { applyVerifiedVNPayFailure } from "../services/vnpayFailureService.js";
+import { applyVerifiedPaymentFailure, applyVerifiedVNPayFailure } from "../services/vnpayFailureService.js";
 import {
   createMoMoPayment,
   verifyMoMoIPNSignature,
@@ -30,6 +31,9 @@ function getValidId(
 
   return new mongoose.Types.ObjectId(value);
 }
+
+const momoPendingCodes = new Set([1000, 7000, 7002, 9000]);
+const momoFinalFailureCodes = new Set([1001, 1002, 1003, 1004, 1005, 1006, 1007, 1017, 1026, 4001, 4002, 4100]);
 
 export class PaymentController {
   // 1. Tạo yêu cầu chuyển khoản ngân hàng
@@ -486,6 +490,12 @@ export class PaymentController {
         throw new AppError("Thông tin thanh toán không khớp", 400);
       }
 
+      if (process.env.VNP_RESULT_PAGE_URL?.trim()) {
+        const url = getPaymentResultPage("VNPay");
+        url.searchParams.set("orderId", order._id.toString());
+        return res.redirect(303, url.toString());
+      }
+
       return res.status(200).json({
         status: "success",
         message: "Đã tiếp nhận kết quả trả về từ VNPay",
@@ -669,7 +679,8 @@ export class PaymentController {
         transactionDate,
       });
 
-      const amountMatches = result.amount === String(order.final_amount * 100);
+      const expectedAmount = String(order.final_amount * 100);
+      const amountMatches = result.amount === expectedAmount;
 
       if (!amountMatches) {
         throw new AppError("Số tiền đối soát không khớp đơn hàng", 409);
@@ -691,19 +702,37 @@ export class PaymentController {
         conclusion = "gateway_failed";
       }
 
+      let databaseUpdated = false;
+      let orderPaymentStatus = order.payment_status;
+      let localPaymentStatus = payment.status;
+      if (req.body?.apply === true && conclusion === "gateway_success") {
+        if (typeof result.transactionNo !== "string") throw new AppError("Thiếu mã giao dịch VNPay.", 409);
+        const settlement = await confirmVNPaySuccess({
+          txnRef: payment.transaction_id, transactionNo: result.transactionNo, amount: expectedAmount,
+        });
+        if (settlement === "conflict") throw new AppError("Trạng thái đơn hoặc thanh toán không khớp.", 409);
+        databaseUpdated = settlement === "confirmed";
+        orderPaymentStatus = localPaymentStatus = "success";
+      } else if (req.body?.apply === true && conclusion === "gateway_failed") {
+        const settlement = await applyVerifiedVNPayFailure({ paymentId: payment._id, adminId: req.user._id });
+        if (settlement === "conflict") throw new AppError("Trạng thái đơn hoặc thanh toán không khớp.", 409);
+        databaseUpdated = settlement === "cancelled_and_restored";
+        orderPaymentStatus = localPaymentStatus = "failed";
+      }
+
       return res.status(200).json({
         status: "success",
         message: "Đã truy vấn kết quả VNPay",
         data: {
           payment_id: payment._id,
           order_id: order._id,
-          local_payment_status: payment.status,
-          order_payment_status: order.payment_status,
+          local_payment_status: localPaymentStatus,
+          order_payment_status: orderPaymentStatus,
           gateway_response_code: result.responseCode,
           gateway_transaction_status: result.transactionStatus,
           gateway_transaction_no: result.transactionNo,
           conclusion,
-          database_updated: false,
+          database_updated: databaseUpdated,
         },
       });
     } catch (error) {
@@ -846,51 +875,35 @@ export class PaymentController {
 
       const momoOrderId = String(order._id);
 
-      // 4. Không tạo trùng Payment
-      const existing = await Payment.findOne({
-        order_id: order._id,
-        payment_method: "MoMo",
-      });
-
-      if (existing) {
-        if (existing.status === "pending" && existing.payment_url) {
-          return res.status(200).json({
-            status: "success",
-            message: "Yêu cầu thanh toán MoMo đã tồn tại",
-            data: {
-              payment_id: existing._id,
-              order_id: order._id,
-              payment_url: existing.payment_url,
-              reused: true,
-            },
-          });
-        }
-
-        throw new AppError(
-          "Yêu cầu MoMo đã tồn tại nhưng chưa hoàn tất. Cần đối soát trước khi thử lại",
-          409,
-        );
+      getPaymentResultPage("MoMo");
+      const payment = await Payment.findOneAndUpdate(
+        { order_id: order._id, payment_method: "MoMo" },
+        { $setOnInsert: { transaction_id: momoOrderId, status: "pending", payment_url: "" } },
+        { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
+      );
+      if (payment.status !== "pending") {
+        throw new AppError("Yêu cầu MoMo đã được xử lý. Hãy kiểm tra chi tiết đơn hàng.", 409);
+      }
+      if (payment.payment_url) {
+        return res.json({
+          status: "success",
+          data: {
+            payment_id: payment._id,
+            order_id: order._id,
+            payment_url: payment.payment_url,
+            reused: true,
+          },
+        });
       }
 
-      // 5. Đặt trước bản ghi Payment để chống tạo trùng
-      const payment = await Payment.create({
-        order_id: order._id,
-        payment_method: "MoMo",
-        transaction_id: momoOrderId,
-        status: "pending",
-        payment_url: "",
-      });
-
-      // 6. Gọi API MoMo Sandbox
-      // Không gửi số tiền lấy trực tiếp từ req.body
+      // MoMo dùng cùng requestId khi lần gọi trước chưa trả về URL.
       const momo = await createMoMoPayment({
         orderId: momoOrderId,
         amount,
         orderInfo: `Thanh toan FStyle ${momoOrderId}`,
       });
 
-      // 7. Lưu URL MoMo trả về
-      const updatedPayment = await Payment.findOneAndUpdate(
+      const savedPayment = await Payment.findOneAndUpdate(
         {
           _id: payment._id,
           payment_method: "MoMo",
@@ -908,6 +921,9 @@ export class PaymentController {
         },
       );
 
+      const updatedPayment = savedPayment ?? await Payment.findOne({
+        _id: payment._id, status: "pending", payment_url: { $ne: "" },
+      });
       if (!updatedPayment) {
         throw new AppError(
           "Trạng thái thanh toán đã thay đổi, cần đối soát",
@@ -922,7 +938,7 @@ export class PaymentController {
           payment_id: updatedPayment._id,
           order_id: order._id,
           payment_url: updatedPayment.payment_url,
-          reused: false,
+          reused: !savedPayment,
         },
       });
     } catch (error) {
@@ -964,17 +980,24 @@ export class PaymentController {
         });
       }
 
-      // 3. Chỉ xử lý thanh toán thành công.
-      // 9000 là trạng thái được cấp quyền, chưa phải
-      // giao dịch hoàn tất.
       if (data.resultCode !== 0) {
+        if (momoPendingCodes.has(data.resultCode)) return res.status(204).send();
+        if (momoFinalFailureCodes.has(data.resultCode)) {
+          const payment = await Payment.findOne({ payment_method: "MoMo", transaction_id: data.orderId, order_id: data.orderId }).lean();
+          const order = payment && await Order.findOne({ _id: payment.order_id, payment_method: "MoMo", final_amount: data.amount }).lean();
+          if (!payment || !order || data.amount <= 0) {
+            return res.status(409).json({ message: "MoMo payment details do not match" });
+          }
+          const outcome = await applyVerifiedPaymentFailure({
+            paymentId: payment._id, method: "MoMo", note: `MoMo xác nhận giao dịch thất bại (${data.resultCode})`,
+          });
+          if (outcome !== "conflict") return res.status(204).send();
+        }
         console.warn("MoMo payment requires reconciliation", {
           orderId: data.orderId,
           resultCode: data.resultCode,
         });
 
-        // Chưa xử lý dứt điểm giao dịch thất bại.
-        // Không xác nhận đã xử lý callback.
         return res.status(503).json({
           message: "Payment reconciliation required",
         });
@@ -1103,21 +1126,7 @@ export class PaymentController {
 
   static async momoReturn(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const resultPage = process.env.MOMO_RESULT_PAGE_URL;
-
-      if (!resultPage) {
-        throw new AppError("Chưa cấu hình trang kết quả MoMo", 500);
-      }
-
-      const url = new URL(resultPage);
-
-      if (
-        !["http:", "https:"].includes(url.protocol) ||
-        url.username ||
-        url.password
-      ) {
-        throw new AppError("URL trang kết quả không hợp lệ", 500);
-      }
+      const url = getPaymentResultPage("MoMo");
 
       const rawOrderId = req.query.orderId;
 

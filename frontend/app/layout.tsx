@@ -1,11 +1,16 @@
 import type { Metadata } from "next";
+import "@fontsource-variable/dm-sans";
+import "@fontsource-variable/playfair-display";
+import "@fontsource-variable/playfair-display/wght-italic.css";
 import "./uniqlo-global.css";
+import "./storefront.css";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
+import { WishlistProvider } from "@/lib/wishlist";
 
 export const metadata: Metadata = {
-  title: "UNIQLO – Demo cửa hàng thời trang",
-  description: "Giao diện đồ án cửa hàng thời trang",
+  title: "F.Style Store",
+  description: "Cửa hàng thời trang F.Style",
 };
 
 export default function RootLayout({
@@ -15,7 +20,7 @@ export default function RootLayout({
     <html lang="vi">
       <body>
         <Header />
-        <main className="site-main">{children}</main>
+        <WishlistProvider><main className="site-main">{children}</main></WishlistProvider>
         <Footer />
       </body>
     </html>

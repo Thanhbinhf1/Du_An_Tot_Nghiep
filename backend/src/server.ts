@@ -23,6 +23,8 @@ import cartRoutes from "./routes/cartRoutes.js";
 import addressRoutes from "./routes/addressRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
+import wishlistRoutes from "./routes/wishlistRoutes.js";
+import { ContactController } from "./controllers/contactController.js";
 
 import { notFound, errorHandler } from "./middlewares/errorMiddleware.js";
 
@@ -58,6 +60,8 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/addresses", addressRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/wishlist", wishlistRoutes);
+app.post("/api/contact", ContactController.create);
 // Error handling middlewares (phải nằm cuối)
 app.use(notFound);
 app.use(errorHandler);

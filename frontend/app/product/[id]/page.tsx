@@ -1,432 +1,498 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import ProductCard from "@/components/product/ProductCard";
 import ProductReviews from "@/components/product/ProductReviews";
-import { formatVnd, products as sampleProducts } from "@/data/products";
-import { toggleWishlist, useWishlistIds } from "@/lib/storefront-demo";
-import {
-  addCartItem as addBackendCartItem,
-  getProductVariants,
-} from "@/lib/cart-api";
+import { formatVnd } from "@/data/products";
+import { useWishlist } from "@/lib/wishlist";
+import { addCartItem } from "@/lib/cart-api";
 import { useDemoAuth } from "@/lib/demo-auth";
-import {
-  API_BASE_URL,
-  mapApiProduct,
-  readApiResponse,
-  type ApiProduct,
-} from "@/lib/api";
+import { API_BASE_URL, mapApiProduct, readApiResponse, type ApiProduct } from "@/lib/api";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
-import type { Product } from "@/types/product";
+import { getColorSwatch } from "@/lib/product-colors";
 
 import "./product.css";
 
+type DetailProduct = ReturnType<typeof mapApiProduct>;
+
 export default function ProductDetailPage() {
+  return <Suspense fallback={<p className="product-loading" role="status">Đang tải sản phẩm…</p>}><ProductRoute /></Suspense>;
+}
+
+function ProductRoute() {
   const { id } = useParams<{ id: string }>();
-  const localProduct = sampleProducts.find((item) => item.id === id);
-  const [apiProduct, setApiProduct] = useState<Product | null>(null);
+  const color = useSearchParams().get("color") ?? "";
+  return <ProductDetail key={id} id={id} initialColor={color} />;
+}
+
+function ProductDetail({ id, initialColor }: { id: string; initialColor: string }) {
+  const [product, setProduct] = useState<DetailProduct>();
   const [productError, setProductError] = useState("");
-  const [size, setSize] = useState(localProduct?.sizes[0] ?? "");
-  const [color, setColor] = useState(localProduct?.color ?? "");
-  const [quantity, setQuantity] = useState(1);
-  const [variantImage, setVariantImage] = useState<{
-    key: string;
-    src: string;
-  } | null>(null);
-  const [imageError, setImageError] = useState<{
-    key: string;
-    message: string;
-  } | null>(null);
-  const [added, setAdded] = useState(false);
-  const [addingToCart, setAddingToCart] = useState(false);
-  const [cartError, setCartError] = useState("");
-  const wishlistIds = useWishlistIds();
-  const { isLoggedIn, token } = useDemoAuth();
-  const { products } = useCatalogProducts();
-  const product = apiProduct ?? localProduct;
-  const variantKey = product ? `${product.id}:${product.image}:${color}` : "";
-
-  async function handleAddToCart() {
-    if (!product || !token || addingToCart) return;
-
-    setAdded(false);
-    setCartError("");
-    setAddingToCart(true);
-
-    try {
-      // Chỉ nhận ID sản phẩm MongoDB thật.
-      if (!/^[a-f\d]{24}$/i.test(product.id)) {
-        throw new Error("Đây là sản phẩm mẫu, chưa có dữ liệu trong MongoDB.");
-      }
-
-      // Lấy các biến thể được phép bán từ Backend.
-      const variants = await getProductVariants(product.id);
-
-      // Tìm đúng biến thể khách đã chọn.
-      const selectedVariant = variants.find(
-        (variant) =>
-          variant.size.trim().toLowerCase() === size.trim().toLowerCase() &&
-          variant.color.trim().toLowerCase() === color.trim().toLowerCase() &&
-          variant.status,
-      );
-
-      if (!selectedVariant) {
-        throw new Error(
-          "Không tìm thấy biến thể phù hợp với size và màu đã chọn.",
-        );
-      }
-
-      if (selectedVariant.stock_quantity < quantity) {
-        throw new Error(
-          `Sản phẩm chỉ còn ${selectedVariant.stock_quantity} trong kho.`,
-        );
-      }
-
-      // Lưu vào MongoDB bằng JWT thật.
-      await addBackendCartItem(selectedVariant._id, quantity, token);
-
-      setAdded(true);
-    } catch (error) {
-      setCartError(
-        error instanceof Error
-          ? error.message
-          : "Không thể thêm sản phẩm vào giỏ hàng.",
-      );
-    } finally {
-      setAddingToCart(false);
-    }
-  }
+  const [retrySeed, setRetrySeed] = useState(0);
 
   useEffect(() => {
-    if (!product) return;
-
-    if (
-      product.code !== "458824" ||
-      !product.image.endsWith("/jacket-sage.jpg") ||
-      color === "55 GREEN"
-    ) {
-      return;
-    }
-
-    const sourceImage = new Image();
-    sourceImage.onload = () => {
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = sourceImage.naturalWidth;
-        canvas.height = sourceImage.naturalHeight;
-        const context = canvas.getContext("2d", { willReadFrequently: true });
-        if (!context) throw new Error("Trình duyệt không hỗ trợ xử lý ảnh.");
-
-        context.drawImage(sourceImage, 0, 0);
-        const imageData = context.getImageData(
-          0,
-          0,
-          canvas.width,
-          canvas.height,
-        );
-
-        for (let index = 0; index < imageData.data.length; index += 4) {
-          const red = imageData.data[index];
-          const green = imageData.data[index + 1];
-          const blue = imageData.data[index + 2];
-          const max = Math.max(red, green, blue);
-          const min = Math.min(red, green, blue);
-          const saturation = max === 0 ? 0 : (max - min) / max;
-          const brightness = (red * 0.299 + green * 0.587 + blue * 0.114) / 255;
-          let hue = 0;
-
-          if (max !== min) {
-            if (max === red) hue = ((green - blue) / (max - min)) % 6;
-            else if (max === green) hue = (blue - red) / (max - min) + 2;
-            else hue = (red - green) / (max - min) + 4;
-            hue = (hue * 60 + 360) % 360;
-          }
-
-          if (hue < 35 || hue > 165 || saturation < 0.035) continue;
-
-          const mask = Math.min(1, (saturation - 0.035) / 0.065);
-          const shade =
-            color === "09 BLACK"
-              ? 0.32 + brightness * 0.62
-              : 0.72 + brightness * 0.28;
-          const target = color === "09 BLACK" ? 24 : 255;
-          imageData.data[index] = red * (1 - mask) + target * shade * mask;
-          imageData.data[index + 1] =
-            green * (1 - mask) + target * shade * mask;
-          imageData.data[index + 2] = blue * (1 - mask) + target * shade * mask;
-        }
-
-        context.putImageData(imageData, 0, 0);
-        setVariantImage({
-          key: variantKey,
-          src: canvas.toDataURL("image/jpeg", 0.92),
-        });
-      } catch (error: unknown) {
-        setImageError({
-          key: variantKey,
-          message:
-            error instanceof Error
-              ? error.message
-              : "Không thể đổi màu ảnh sản phẩm.",
-        });
-      }
-    };
-    sourceImage.onerror = () =>
-      setImageError({
-        key: variantKey,
-        message: "Không thể tải ảnh sản phẩm để đổi màu.",
-      });
-    sourceImage.src = product.image;
-
-    return () => {
-      sourceImage.onload = null;
-      sourceImage.onerror = null;
-    };
-  }, [color, product, variantKey]);
-
-  useEffect(() => {
-    if (localProduct) return;
-    let active = true;
-    fetch(`${API_BASE_URL}/catalog/products/${id}`)
+    const controller = new AbortController();
+    fetch(`${API_BASE_URL}/products/${encodeURIComponent(id)}`, {
+      signal: controller.signal,
+      cache: "no-store",
+    })
       .then(readApiResponse<ApiProduct>)
-      .then((result) => {
-        if (!active) return;
-        const loadedProduct = mapApiProduct(result);
-        setApiProduct(loadedProduct);
-        setSize(loadedProduct.sizes[0] ?? "M");
-        setColor(loadedProduct.color);
+      .then((data) => {
+        if (!controller.signal.aborted) setProduct(mapApiProduct(data));
       })
-      .catch((error: unknown) => {
-        if (active)
-          setProductError(
-            error instanceof Error ? error.message : "Không thể tải sản phẩm.",
-          );
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted) {
+          setProductError(cause instanceof Error ? cause.message : "Không thể tải sản phẩm.");
+        }
       });
-    return () => {
-      active = false;
-    };
-  }, [id, localProduct]);
+    return () => controller.abort();
+  }, [id, retrySeed]);
 
   if (!product) {
     return (
-      <div className="empty-state">
-        {productError || "Đang tải sản phẩm..."}
+      <div className="container product-page">
+        <div className="empty-state" role={productError ? "alert" : "status"}>
+          {productError ? (
+            <>
+              <h2>Không thể tải dữ liệu sản phẩm</h2>
+              <p>{productError}</p>
+              <div className="error-recovery-actions">
+                <button
+                  type="button"
+                  className="pill-button dark"
+                  onClick={() => { setProductError(""); setRetrySeed((prev) => prev + 1); }}
+                >
+                  Thử tải lại
+                </button>
+                <Link href="/products" className="pill-button">
+                  Quay lại danh sách sản phẩm
+                </Link>
+              </div>
+            </>
+          ) : (
+            "Đang tải sản phẩm..."
+          )}
+        </div>
       </div>
     );
   }
-  const favorite = wishlistIds.includes(product.id);
+  return <ProductDetails key={initialColor} product={product} initialColor={initialColor} />;
+}
+
+function ProductDetails({ product, initialColor }: { product: DetailProduct; initialColor: string }) {
+  const matchingColors = product.variants.filter((variant) => variant.color === initialColor);
+  const firstVariant =
+    matchingColors.find((variant) => variant.stock_quantity > 0) ?? matchingColors[0] ??
+    product.variants.find((variant) => variant.stock_quantity > 0) ?? product.variants[0];
+  const [selectedColor, setSelectedColor] = useState(firstVariant?.color ?? "");
+  const [variantId, setVariantId] = useState(firstVariant?._id ?? "");
+  const [quantity, setQuantity] = useState(1);
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState(false);
+  const [cartError, setCartError] = useState("");
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const { token } = useDemoAuth();
+  const wishlist = useWishlist();
+  const { products } = useCatalogProducts();
+
+  // Danh sách ảnh gallery (ảnh chính + ảnh phụ)
+  const galleryImages = useMemo(() => {
+    const base = [product.image, ...(product.images ?? [])];
+    return [...new Set(base.filter(Boolean))];
+  }, [product.image, product.images]);
+
+  const currentImage = galleryImages[activeImageIndex] ?? product.image ?? "";
+
+  useEffect(() => {
+    if (!zoomOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setZoomOpen(false);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [zoomOpen]);
+
+  const colors = [...new Set(product.variants.map((item) => item.color))];
+  const variant = product.variants.find((item) => item._id === variantId);
+  const activeColor = variant?.color ?? selectedColor ?? colors[0] ?? "";
+  const sizesForColor = product.variants.filter((item) => item.color === activeColor);
+  const stock = variant?.stock_quantity ?? 0;
+
+  // Giá gốc, giá giảm & % giảm
+  const displayVariant = variant ?? sizesForColor[0] ?? firstVariant;
+  const originalPrice = displayVariant?.price ?? product.originalPrice ?? product.price;
+  const effectivePrice = displayVariant ? (displayVariant.sale_price ?? displayVariant.price) : product.price;
+  const isDiscounted = originalPrice > effectivePrice && originalPrice > 0;
+  const discountPercent = isDiscounted
+    ? Math.round(((originalPrice - effectivePrice) / originalPrice) * 100)
+    : 0;
+
+  // Sản phẩm cùng danh mục (Liên quan)
+  const related = products
+    .filter((item) => item.id !== product.id && item.category === product.category)
+    .slice(0, 4);
+
+  // Phối đồ (Gợi ý các món đồ kết hợp khác loại hoặc ăn ý)
+  const mixAndMatchProducts = useMemo(() => {
+    const others = products.filter((item) => item.id !== product.id);
+    const differentCategory = others.filter((item) => item.category !== product.category);
+    return (differentCategory.length >= 3 ? differentCategory : others).slice(0, 3);
+  }, [product.category, product.id, products]);
+
+  const favorite = wishlist.ids.includes(product.id);
+
+  function selectVariant(id: string) {
+    const target = product.variants.find((item) => item._id === id);
+    if (target) setSelectedColor(target.color);
+    setVariantId(id);
+    setQuantity(1);
+    setAdded(false);
+    setCartError("");
+  }
+
+  function handleColorChange(nextColor: string) {
+    setSelectedColor(nextColor);
+    const options = product.variants.filter((item) => item.color === nextColor);
+    const next =
+      options.find((item) => item.size === variant?.size && item.stock_quantity > 0) ??
+      options.find((item) => item.stock_quantity > 0) ??
+      options[0];
+    if (next) {
+      selectVariant(next._id);
+    } else {
+      setVariantId("");
+    }
+  }
+
+  async function handleAddToCart() {
+    setAdded(false);
+    setCartError("");
+
+    // Xử lý trường hợp chưa chọn size
+    if (!variantId || !variant) {
+      setCartError("Vui lòng chọn kích cỡ sản phẩm trước khi thêm vào giỏ hàng.");
+      return;
+    }
+
+    // Xử lý trường hợp biến thể hết hàng
+    if (stock <= 0) {
+      setCartError("Biến thể đã chọn hiện đang hết hàng. Vui lòng chọn kích cỡ hoặc màu sắc khác.");
+      return;
+    }
+
+    if (!token || adding || quantity > stock) return;
+
+    setAdding(true);
+    try {
+      await addCartItem(variant._id, quantity, token);
+      setAdded(true);
+    } catch (cause) {
+      setCartError(
+        cause instanceof Error ? cause.message : "Không thể thêm sản phẩm vào giỏ hàng.",
+      );
+    } finally {
+      setAdding(false);
+    }
+  }
 
   return (
     <div className="container product-page">
       <nav className="breadcrumb product-breadcrumb" aria-label="Điều hướng">
-        <Link href="/">Trang chủ</Link>
-        <span aria-hidden="true">/</span>
-        <Link
-          href={`/products?category=${encodeURIComponent(product.category)}`}
-        >
-          {product.category}
-        </Link>
-        <span aria-hidden="true">/</span>
+        <Link href="/">Trang chủ</Link> /{" "}
+        {product.category && (
+          <>
+            <Link href={product.categorySlug ? `/categories/${encodeURIComponent(product.categorySlug)}`
+              : `/products?category=${encodeURIComponent(product.category)}`}>
+              {product.category}
+            </Link>{" "}
+            /{" "}
+          </>
+        )}
         <span aria-current="page">{product.name}</span>
       </nav>
 
       <div className="product-detail">
-        <div className="product-gallery">
-          <img
-            className="product-main-image"
-            src={
-              variantImage?.key === variantKey
-                ? variantImage.src
-                : product.image
-            }
-            alt={`${product.name} - màu ${color}`}
-          />
-          <p className="product-image-caption">
-            {product.name} · {color}
-          </p>
-          {imageError?.key === variantKey && (
-            <p className="product-image-error" role="status">
-              {imageError.message}
-            </p>
-          )}
+        <div className="product-gallery-container">
+          <div className={`product-gallery-grid${galleryImages.length === 1 ? " single" : ""}`} aria-label="Ảnh sản phẩm">
+            {galleryImages.length ? (
+              galleryImages.map((url, index) => (
+                <button key={url} type="button" className="product-gallery-tile"
+                  onClick={() => { setActiveImageIndex(index); setZoomOpen(true); }}
+                  aria-label={`Phóng to ảnh ${index + 1} của ${product.name}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- image URLs are supplied by the catalog */}
+                  <img src={url} alt="" loading={index > 1 ? "lazy" : "eager"} />
+                  <span className="product-gallery-zoom" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={1.6}>
+                      <circle cx="10.5" cy="10.5" r="6" /><path d="m15 15 5 5m-9.5-12v5m-2.5-2.5h5" />
+                    </svg>
+                  </span>
+                </button>
+              ))
+            ) : (
+              <p className="empty-state">Chưa có ảnh sản phẩm</p>
+            )}
+          </div>
         </div>
 
+        {/* 2. THÔNG TIN SẢN PHẨM & BIẾN THỂ */}
         <section className="product-info" aria-label="Thông tin sản phẩm">
-          <p className="product-code">Mã sản phẩm: {product.code}</p>
           <h1 className="product-title">{product.name}</h1>
-          <p className="detail-price">{formatVnd(product.price)}</p>
-          <p
-            className="product-rating"
-            aria-label={`Đánh giá ${product.rating} trên 5`}
-          >
-            <span aria-hidden="true">★</span> {product.rating.toFixed(1)}
-            <span className="rating-caption"> · Đánh giá của khách hàng</span>
-          </p>
-
-          <div className="product-option-group">
-            <p className="product-option-label">
-              Màu sắc: <strong>{color}</strong>
-            </p>
-            <div
-              className="product-color-options"
-              role="group"
-              aria-label="Chọn màu sắc"
-            >
-              {[product.color, "09 BLACK", "00 WHITE"]
-                .filter(
-                  (value, index, values) => values.indexOf(value) === index,
-                )
-                .map((value) => (
-                  <button
-                    key={value}
-                    className={`product-color-option${color === value ? " selected" : ""}`}
-                    type="button"
-                    aria-label={value}
-                    aria-pressed={color === value}
-                    onClick={() => setColor(value)}
-                  >
-                    <span
-                      className={`color-swatch swatch-${value.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-                    />
-                  </button>
-                ))}
-            </div>
+          <div className="product-meta-header">
+            <p className="product-code">{[product.brand, variant?.sku].filter(Boolean).join(" · ")}</p>
+            {product.rating > 0 && <a className="product-rating-link" href="#product-reviews" aria-label={`Xem đánh giá, ${product.rating.toFixed(1)} trên 5 sao`}>
+              <span aria-hidden="true">★</span> {product.rating.toFixed(1)} {product.reviewCount ? `(${product.reviewCount})` : ""}
+            </a>}
           </div>
 
-          <div className="product-option-group">
-            <div className="size-label-row">
-              <p className="product-option-label">
-                Kích cỡ: <strong>{size || "Chọn kích cỡ"}</strong>
+          {product.variants.length > 0 ? (
+            <>
+              <fieldset className="product-option-group product-color-group" disabled={adding}>
+                <legend className="product-option-label">Màu sắc {activeColor && <strong>({activeColor})</strong>}</legend>
+                <div className="product-color-options">
+                  {colors.map((color) => {
+                    const swatch = getColorSwatch(color);
+                    const soldOut = !product.variants.some((item) => item.color === color && item.stock_quantity > 0);
+                    return (
+                      <button key={color} type="button" className="product-color-option"
+                        aria-label={`${color}${soldOut ? " · Hết hàng" : ""}`} title={color}
+                        aria-pressed={color === activeColor} onClick={() => handleColorChange(color)}>
+                        <span className="product-color-swatch" style={swatch ? { backgroundColor: swatch } : undefined} aria-hidden="true">
+                          {!swatch && color.slice(0, 2)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {!colors.length && <p className="small muted">Chưa có màu nào đang bán.</p>}
+                </div>
+              </fieldset>
+
+              {/* Chọn Kích cỡ + Tư vấn size */}
+              <div className="product-option-group">
+                <div className="size-label-row">
+                  <p className="product-option-label">
+                    Kích cỡ {variant ? <strong>({variant.size})</strong> : <span>(Chưa chọn)</span>}
+                  </p>
+                  <Link className="size-guide-btn" href={product.categoryId ? `/tu-van-size?categoryId=${encodeURIComponent(product.categoryId)}&productId=${encodeURIComponent(product.id)}` : "/tu-van-size"}>
+                    Tư vấn kích cỡ
+                  </Link>
+                </div>
+
+                <div className="product-size-options" role="group" aria-label="Chọn kích cỡ">
+                  {sizesForColor.map((item) => (
+                    <button
+                      key={item._id}
+                      type="button"
+                      className={`product-size-option${item._id === variantId ? " selected" : ""}${
+                        item.stock_quantity === 0 ? " out-of-stock" : ""
+                      }`}
+                      aria-pressed={item._id === variantId}
+                      disabled={adding}
+                      onClick={() => {
+                        if (item._id === variantId) {
+                          setVariantId("");
+                          setCartError("");
+                        } else {
+                          selectVariant(item._id);
+                        }
+                      }}
+                    >
+                      {item.size}
+                      {item.stock_quantity === 0 ? " (hết hàng)" : ""}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="detail-price-box">
+                <p className="detail-price">
+                  {formatVnd(effectivePrice)}
+                  {isDiscounted && <> <del>{formatVnd(originalPrice)}</del></>}
+                </p>
+                {isDiscounted && discountPercent > 0 && (
+                  <span className="detail-discount-badge">-{discountPercent}%</span>
+                )}
+              </div>
+
+              {/* Trạng thái tồn kho theo biến thể */}
+              <p
+                role="status"
+                className={`stock-status-badge ${
+                  !variant ? "stock-warning" : stock > 0 ? "stock-in" : "stock-out"
+                }`}
+              >
+                {!variant
+                  ? "Vui lòng chọn kích cỡ để kiểm tra tồn kho"
+                  : stock > 0
+                    ? `Còn ${stock} sản phẩm`
+                    : "Biến thể này đã hết hàng"}
               </p>
-              <a href="#size-guide">Hướng dẫn chọn cỡ</a>
-            </div>
-            <div
-              className="product-size-options"
-              role="group"
-              aria-label="Chọn kích cỡ"
-            >
-              {product.sizes.map((availableSize) => (
-                <button
-                  key={availableSize}
-                  className={`product-size-option${size === availableSize ? " selected" : ""}`}
-                  type="button"
-                  aria-pressed={size === availableSize}
-                  onClick={() => setSize(availableSize)}
-                >
-                  {availableSize}
-                </button>
-              ))}
-            </div>
-          </div>
 
-          <div className="product-quantity-group">
-            <p className="product-option-label">Số lượng</p>
-            <div
-              className="product-quantity-control"
-              aria-label="Chọn số lượng sản phẩm"
-            >
-              <button
-                type="button"
-                aria-label="Giảm số lượng"
-                disabled={quantity <= 1}
-                onClick={() =>
-                  setQuantity((current) => Math.max(1, current - 1))
-                }
-              >
-                −
-              </button>
-              <span aria-live="polite">{quantity}</span>
-              <button
-                type="button"
-                aria-label="Tăng số lượng"
-                onClick={() => setQuantity((current) => current + 1)}
-              >
-                +
-              </button>
-            </div>
-          </div>
-
-          {isLoggedIn ? (
-            <button
-              className="product-add-button"
-              type="button"
-              disabled={addingToCart || !token}
-              onClick={handleAddToCart}
-            >
-              {addingToCart
-                ? "Đang thêm vào giỏ hàng..."
-                : `Thêm ${quantity > 1 ? `${quantity} sản phẩm vào` : "vào"} giỏ hàng`}
-            </button>
+            </>
           ) : (
-            <div className="product-login-required" role="status">
-              <p>Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng.</p>
-              <Link className="product-add-button" href="/dang-nhap">
-                Đăng nhập
-              </Link>
-            </div>
-          )}
-          <button
-            className={`product-wishlist-button${favorite ? " active" : ""}`}
-            type="button"
-            aria-pressed={favorite}
-            onClick={() => toggleWishlist(product.id)}
-          >
-            <span aria-hidden="true">{favorite ? "♥" : "♡"}</span>
-            {favorite ? "Đã thêm vào yêu thích" : "Thêm vào yêu thích"}
-          </button>
-          {added && (
-            <p className="product-added-message" role="status">
-              Đã lưu vào giỏ hàng MongoDB · Size {size}, màu {color}.
+            <p role="status" className="stock-status-badge stock-out">
+              Sản phẩm chưa có biến thể đang bán.
             </p>
           )}
 
+          <div className="product-option-group product-action-buttons">
+            <div className="product-buy-row">
+              {variant && stock > 0 && (
+                <div className="product-quantity-control" aria-label="Chọn số lượng sản phẩm">
+                  <button type="button" aria-label="Giảm số lượng"
+                    disabled={adding || quantity <= 1} onClick={() => setQuantity(quantity - 1)}>−</button>
+                  <span aria-live="polite">{quantity}</span>
+                  <button type="button" aria-label="Tăng số lượng"
+                    disabled={adding || quantity >= stock} onClick={() => setQuantity(quantity + 1)}>+</button>
+                </div>
+              )}
+              {token ? (
+                <button type="button" className="pill-button dark"
+                  disabled={adding || !variant || stock <= 0} onClick={handleAddToCart}>
+                  {adding ? "Đang thêm..." : variant && stock <= 0 ? "Hết hàng" : "Thêm vào giỏ hàng"}
+                </button>
+              ) : (
+                <Link className="pill-button dark" href="/dang-nhap">Đăng nhập để mua hàng</Link>
+              )}
+            </div>
+            <button
+              type="button"
+              className={`product-wishlist-button${favorite ? " active" : ""}`}
+              aria-pressed={favorite}
+              disabled={wishlist.loading || wishlist.busy}
+              onClick={() => void wishlist.toggle(product.id)}
+            >
+              {favorite ? "♥ Bỏ yêu thích" : "♡ Thêm vào yêu thích"}
+            </button>
+          </div>
+
+          {wishlist.error && <p role="alert">{wishlist.error}</p>}
           {cartError && (
             <p className="product-image-error" role="alert">
               {cartError}
             </p>
           )}
+          {added && (
+            <p className="product-added-message" role="status">
+              Đã thêm vào giỏ hàng. <Link href="/cart">Xem giỏ hàng</Link>
+            </p>
+          )}
 
           <div className="product-details-list">
             <details open>
-              <summary>Mô tả sản phẩm</summary>
+              <summary>Mô tả & Chất liệu</summary>
               <p>
-                {product.name}. Màu sắc: {product.color}. Mã sản phẩm:{" "}
-                {product.code}.
-              </p>
-            </details>
-            <details id="size-guide">
-              <summary>Kích cỡ</summary>
-              <p>
-                Các kích cỡ hiện có: {product.sizes.join(", ")}. Vui lòng chọn
-                kích cỡ phù hợp trước khi thêm vào giỏ hàng.
+                {product.description || "Chưa có mô tả sản phẩm."}
               </p>
             </details>
             <details>
               <summary>Giao hàng / Đổi trả</summary>
               <p>
-                Xem <Link href="/shipping">chính sách giao hàng</Link> và{" "}
-                <Link href="/returns">chính sách đổi trả</Link> của cửa hàng.
+                Phí giao hàng được tính khi thanh toán. Xem{" "}
+                <Link href="/shipping">chính sách giao hàng</Link> và{" "}
+                <Link href="/returns">chính sách đổi trả</Link>.
               </p>
             </details>
           </div>
         </section>
       </div>
 
-      <ProductReviews key={product.id} productId={product.id} />
+      {/* 3. PHỐI ĐỒ: Gợi ý sản phẩm kết hợp (Mix & Match) */}
+      {mixAndMatchProducts.length > 0 && (
+        <section className="mix-match-section" aria-label="Gợi ý phối đồ">
+          <div className="section-heading">
+            <div>
+              <h2 className="section-title">Gợi ý phối đồ</h2>
+            </div>
+          </div>
+          <div className="mix-match-grid">
+            {mixAndMatchProducts.map((item) => (
+              <div className="mix-match-card" key={item.id}>
+                <Link href={`/product/${item.id}`} className="mix-match-img-link">
+                  {item.image ? (
+                    <img src={item.image} alt={item.name} loading="lazy" />
+                  ) : (
+                    <span className="empty-state">Ảnh SP</span>
+                  )}
+                </Link>
+                <div className="mix-match-info">
+                  <span className="product-meta">{item.category || "Phối đồ F.Style"}</span>
+                  <Link href={`/product/${item.id}`}>
+                    <strong>{item.name}</strong>
+                  </Link>
+                  <p className="price">{formatVnd(item.price)}</p>
+                  <Link href={`/product/${item.id}`} className="pill-button small-pill">
+                    Xem kết hợp →
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
-      <section className="related-products">
-        <h2 className="section-title">Sản phẩm bạn có thể quan tâm</h2>
-        <div className="product-grid">
-          {products
-            .filter((item) => item.id !== product.id)
-            .slice(0, 6)
-            .map((item) => (
+      {/* 4. ĐÁNH GIÁ SẢN PHẨM */}
+      <ProductReviews productId={product.id} />
+
+      {/* 5. SẢN PHẨM LIÊN QUAN */}
+      {related.length > 0 && (
+        <section className="related-products">
+          <h2 className="section-title">Sản phẩm liên quan</h2>
+          <div className="product-grid">
+            {related.map((item) => (
               <ProductCard key={item.id} product={item} />
             ))}
+          </div>
+        </section>
+      )}
+
+      {/* MODAL PHÓNG TO ẢNH (ZOOM LIGHTBOX) */}
+      {zoomOpen && currentImage && (
+        <div
+          className="image-zoom-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Phóng to hình ảnh sản phẩm"
+          onClick={() => setZoomOpen(false)}
+        >
+          <div className="image-zoom-dialog" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="image-zoom-close"
+              onClick={() => setZoomOpen(false)}
+              aria-label="Đóng phóng to"
+            >
+              × Đóng
+            </button>
+            <img src={currentImage} alt={product.name} />
+            {galleryImages.length > 1 && (
+              <div className="image-zoom-controls">
+                <button
+                  type="button"
+                  className="pill-button"
+                  onClick={() =>
+                    setActiveImageIndex((prev) => (prev - 1 + galleryImages.length) % galleryImages.length)
+                  }
+                >
+                  ← Ảnh trước
+                </button>
+                <span>
+                  {activeImageIndex + 1} / {galleryImages.length}
+                </span>
+                <button
+                  type="button"
+                  className="pill-button"
+                  onClick={() => setActiveImageIndex((prev) => (prev + 1) % galleryImages.length)}
+                >
+                  Ảnh tiếp →
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      </section>
+      )}
     </div>
   );
 }

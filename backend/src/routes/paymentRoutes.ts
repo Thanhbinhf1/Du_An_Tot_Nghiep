@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { protect } from "../middlewares/authMiddleware.js";
 import { PaymentController } from "../controllers/paymentController.js";
+import { configuredPaymentMethods } from "../config/paymentMethods.js";
 
 const router = Router();
 
@@ -12,6 +13,10 @@ router.get("/momo/return", PaymentController.momoReturn);
 
 // Các API bên dưới yêu cầu đăng nhập
 router.use(protect);
+
+router.get("/methods", (_req, res) => {
+  res.json({ status: "success", data: configuredPaymentMethods() });
+});
 
 // MoMo
 router.post("/momo/create", PaymentController.createMoMoPayment);

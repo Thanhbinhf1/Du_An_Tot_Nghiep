@@ -1,4 +1,13 @@
 import { API_BASE_URL, authenticatedHeaders, readApiResponse } from "./api";
+import type { PaymentMethod } from "./order-api";
+
+export async function getPaymentMethods(token: string) {
+  const response = await fetch(`${API_BASE_URL}/payments/methods`, {
+    headers: authenticatedHeaders(token),
+    cache: "no-store",
+  });
+  return readApiResponse<PaymentMethod[]>(response);
+}
 
 export type PaymentStatus = "pending" | "success" | "failed" | "refunded";
 

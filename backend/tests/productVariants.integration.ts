@@ -8,6 +8,10 @@ import dotenv from "dotenv";
 import express from "express";
 import mongoose from "mongoose";
 import authRoutes from "../src/routes/authRoutes.js";
+import adminRoutes from "../src/routes/adminRoutes.js";
+import orderRoutes from "../src/routes/orderRoutes.js";
+import paymentRoutes from "../src/routes/paymentRoutes.js";
+import reviewRoutes from "../src/routes/productCommentRoutes.js";
 import productRoutes from "../src/routes/productRoutes.js";
 import { errorHandler, notFound } from "../src/middlewares/errorMiddleware.js";
 import User from "../src/models/userModel.js";
@@ -15,6 +19,10 @@ import Category from "../src/models/categoryModel.js";
 import Brand from "../src/models/brandModel.js";
 import Product from "../src/models/productModel.js";
 import ProductVariant from "../src/models/productVariantModel.js";
+import Order from "../src/models/orderModel.js";
+import OrderDetail from "../src/models/orderDetailModel.js";
+import Payment from "../src/models/paymentModel.js";
+import ReviewReport from "../src/models/reviewReportModel.js";
 
 dotenv.config({ quiet: true });
 const databaseName = `pv_test_${randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -30,6 +38,7 @@ let otherProductId: string;
 let variantId: string;
 let secondVariantId: string;
 const valid = { sku: " test-m-black ", size: " M ", color: " Đen ", price: 250000, sale_price: 220000, stock_quantity: 10 };
+const momoAttempts: Array<{ orderId: string; requestId: string; amount: number }> = [];
 
 before(async () => {
   const uri = process.env.DATABASE ?? process.env.DATABASE_URL;
@@ -43,14 +52,27 @@ before(async () => {
     throw new Error(`Không kết nối được MongoDB (${error instanceof Error ? error.name : "unknown"})`);
   }
   assert.equal(mongoose.connection.name, databaseName);
-  await Promise.all([User, Category, Brand, Product, ProductVariant].map((model) => model.createIndexes()));
+  await Promise.all([User, Category, Brand, Product, ProductVariant, Payment, ReviewReport].map((model) => model.createIndexes()));
   process.env.JWT_SECRET = randomUUID();
   await User.create({ name: "Integration Admin", email: "admin@variant-test.invalid", password: await bcrypt.hash(password, 10), role: "admin" });
 
   const app = express();
   app.use(express.json());
   app.use("/api/auth", authRoutes);
+  app.use("/api/admin", adminRoutes);
+  app.use("/api/orders", orderRoutes);
+  app.use("/api/payments", paymentRoutes);
+  app.use("/api/reviews", reviewRoutes);
   app.use("/api/products", productRoutes);
+  app.post("/mock-momo", (req, res) => {
+    const { partnerCode, orderId, requestId, amount } = req.body;
+    momoAttempts.push({ orderId, requestId, amount });
+    if (momoAttempts.length === 1) {
+      res.status(503).json({ resultCode: 10 });
+      return;
+    }
+    res.json({ partnerCode, orderId, requestId, resultCode: 0, payUrl: "https://test-payment.momo.vn/fixture-checkout" });
+  });
   app.use(notFound);
   app.use(errorHandler);
   server = app.listen(0, "127.0.0.1");
@@ -212,6 +234,61 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     assert.equal((await ProductVariant.findById(variantId))?.stock_quantity, 3);
   });
 
+  await t.test("đánh giá đúng sản phẩm sau giao hàng và xử lý báo cáo trùng", async () => {
+    const customer = await User.findOne({ email: "customer@variant-test.invalid" });
+    assert.ok(customer);
+    const order = await Order.create({
+      user_id: customer._id, total_product_amount: 400000, final_amount: 400000,
+      receiver_name: customer.name, receiver_phone: "0900000000", shipping_address: "Địa chỉ kiểm thử",
+      payment_method: "VNPay", payment_status: "success", order_status: "shipping",
+    });
+    const line = { order_id: order._id, product_name: "Tên sản phẩm cũ", size: "M", color: "Đen", quantity: 1, price_at_buy: 200000 };
+    await OrderDetail.insertMany([
+      { ...line, sku: "LEGACY-REVIEW", product_variant_id: variantId },
+      { ...line, sku: "SNAPSHOT-REVIEW", product_variant_id: new mongoose.Types.ObjectId(), product_id: otherProductId },
+    ]);
+    const orderPath = `/orders/${order.id}`;
+    const reviewPath = `/reviews/${productId}`;
+    const reviewInput = { rating: 5, comment: "Vải mềm và đúng kích cỡ." };
+    const shipping = await request("GET", orderPath, undefined, customerToken);
+    assert.equal(shipping.body.data.items[0].review_product_id, undefined);
+    assert.equal((await request("POST", reviewPath, reviewInput, customerToken)).status, 403);
+
+    await Order.updateOne({ _id: order._id }, { order_status: "completed" });
+    const completed = await request("GET", orderPath, undefined, customerToken);
+    assert.equal(completed.status, 200);
+    assert.deepEqual(completed.body.data.items.map((item: { review_product_id: string }) => item.review_product_id).sort(),
+      [productId, otherProductId].sort());
+    assert.equal((await request("GET", orderPath, undefined, token)).status, 404);
+    for (const id of [productId, otherProductId]) {
+      const eligibility = await request("GET", `/reviews/${id}/eligibility`, undefined, customerToken);
+      assert.equal(eligibility.body.data.canReview, true);
+    }
+    assert.equal((await request("POST", reviewPath, reviewInput, token)).status, 403);
+
+    const saved = await request("POST", reviewPath, reviewInput, customerToken);
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.data.user_email, undefined);
+    const reviewId = saved.body.data._id;
+    const reportPath = `${reviewPath}/reports/${reviewId}`;
+    assert.equal((await request("POST", reportPath, { reason: "invalid" }, token)).status, 400);
+    assert.equal((await request("POST", reportPath, { reason: "spam" }, customerToken)).status, 403);
+    const reports = await Promise.all([
+      request("POST", reportPath, { reason: "spam" }, token),
+      request("POST", reportPath, { reason: "spam" }, token),
+    ]);
+    assert.deepEqual(reports.map((result) => result.status).sort(), [200, 201]);
+    assert.equal((await request("GET", "/admin/review-reports", undefined, customerToken)).status, 403);
+    const pending = await request("GET", "/admin/review-reports", undefined, token);
+    assert.equal(pending.body.data.reports.length, 1);
+    assert.equal(pending.body.data.reports[0].comment, reviewInput.comment);
+    assert.equal((await request("DELETE", `/admin/reviews/${reviewId}`, undefined, token)).status, 200);
+    assert.equal((await request("GET", reviewPath)).body.data.total, 0);
+    assert.equal((await request("GET", "/admin/review-reports", undefined, token)).body.data.reports.length, 0);
+    const history = await request("GET", "/admin/review-reports?view=history", undefined, token);
+    assert.equal(history.body.data.reports[0].status, "removed");
+  });
+
   await t.test("admin vẫn quản lý được sản phẩm đã tắt và danh sách có phân trang", async () => {
     await Product.findByIdAndUpdate(productId, { status: false });
     assert.equal((await request("GET", variantsPath())).status, 404);
@@ -226,5 +303,53 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     assert.equal(variants.status, 200);
     assert.ok(variants.body.data.length > 0);
     assert.equal((await request("GET", "/products/admin?page=Infinity", undefined, token)).status, 400);
+  });
+
+  await t.test("thử lại MoMo trên một đơn và giữ nguyên mã yêu cầu khi cổng tạm lỗi", async (test) => {
+    const backendOrigin = new URL(base).origin;
+    const environment = {
+      MOMO_PARTNER_CODE: "LOCAL_TEST",
+      MOMO_ACCESS_KEY: randomUUID(),
+      MOMO_SECRET_KEY: randomUUID(),
+      MOMO_ENDPOINT: `${backendOrigin}/mock-momo`,
+      MOMO_REDIRECT_URL: `${base}/payments/momo/return`,
+      MOMO_IPN_URL: `${base}/payments/momo/ipn`,
+      MOMO_RESULT_PAGE_URL: "",
+    };
+    const previous = Object.keys(environment).map((key) => [key, process.env[key]] as const);
+    test.after(() => {
+      for (const [key, value] of previous) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    Object.assign(process.env, environment);
+    const methods = () => request("GET", "/payments/methods", undefined, customerToken);
+    assert.ok(!(await methods()).body.data.includes("MoMo"));
+    process.env.MOMO_RESULT_PAGE_URL = `${backendOrigin}/payment/result`;
+    assert.ok((await methods()).body.data.includes("MoMo"));
+
+    const customer = await User.findOne({ email: "customer@variant-test.invalid" });
+    assert.ok(customer);
+    const order = await Order.create({
+      user_id: customer._id, total_product_amount: 200000, final_amount: 200000,
+      receiver_name: customer.name, receiver_phone: "0900000000", shipping_address: "Địa chỉ kiểm thử",
+      payment_method: "MoMo",
+    });
+    const createPayment = () => request("POST", "/payments/momo/create", { order_id: order.id }, customerToken);
+    assert.equal((await createPayment()).status, 502);
+    assert.equal((await Payment.findOne({ order_id: order._id }))?.payment_url, "");
+    const retried = await createPayment();
+    assert.equal(retried.status, 200);
+    assert.match(retried.body.data.payment_url, /^https:\/\/test-payment\.momo\.vn\//);
+    const cached = await createPayment();
+    assert.equal(cached.body.data.reused, true);
+    assert.equal(cached.body.data.payment_id, retried.body.data.payment_id);
+    assert.deepEqual(momoAttempts, [
+      { orderId: order.id, requestId: order.id, amount: 200000 },
+      { orderId: order.id, requestId: order.id, amount: 200000 },
+    ]);
+    assert.equal(await Payment.countDocuments({ order_id: order._id }), 1);
+    assert.equal((await Order.findById(order._id))?.payment_status, "pending");
   });
 });
