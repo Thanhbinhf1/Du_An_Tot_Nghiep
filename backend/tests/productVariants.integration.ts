@@ -23,6 +23,9 @@ import Order from "../src/models/orderModel.js";
 import OrderDetail from "../src/models/orderDetailModel.js";
 import Payment from "../src/models/paymentModel.js";
 import ReviewReport from "../src/models/reviewReportModel.js";
+import Address from "../src/models/addressModel.js";
+import Cart from "../src/models/cartModel.js";
+import CartDetail from "../src/models/cartDetailModel.js";
 
 dotenv.config({ quiet: true });
 const databaseName = `pv_test_${randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -351,5 +354,180 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     ]);
     assert.equal(await Payment.countDocuments({ order_id: order._id }), 1);
     assert.equal((await Order.findById(order._id))?.payment_status, "pending");
+  });
+
+  await t.test("SePay tạo QR theo đơn và xác nhận giao dịch qua webhook hoặc API", async (test) => {
+    const environment = {
+      SEPAY_BANK_CODE: "MBBank",
+      SEPAY_ACCOUNT_NUMBER: "000123456789",
+      SEPAY_ACCOUNT_NAME: "FSTYLE TEST",
+      SEPAY_WEBHOOK_API_KEY: randomUUID(),
+      SEPAY_API_TOKEN: randomUUID(),
+      SEPAY_ENV: "sandbox",
+    };
+    const previous = Object.keys(environment).map((key) => [key, process.env[key]] as const);
+    test.after(() => {
+      for (const [key, value] of previous) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    Object.assign(process.env, { ...environment, SEPAY_WEBHOOK_API_KEY: "", SEPAY_API_TOKEN: "" });
+    const methods = () => request("GET", "/payments/methods", undefined, customerToken);
+    assert.ok(!(await methods()).body.data.includes("SePay"));
+    process.env.SEPAY_API_TOKEN = environment.SEPAY_API_TOKEN;
+    assert.ok((await methods()).body.data.includes("SePay"));
+    process.env.SEPAY_WEBHOOK_API_KEY = environment.SEPAY_WEBHOOK_API_KEY;
+    assert.ok((await methods()).body.data.includes("SePay"));
+
+    const customer = await User.findOne({ email: "customer@variant-test.invalid" });
+    assert.ok(customer);
+    await Product.updateOne({ _id: productId }, { $set: { status: true } });
+    await ProductVariant.updateOne({ _id: variantId }, { $set: { status: true, stock_quantity: 5 } });
+    const cart = await Cart.findOneAndUpdate({ user_id: customer._id }, { $setOnInsert: { user_id: customer._id } }, { upsert: true, returnDocument: "after" });
+    await CartDetail.create({ cart_id: cart._id, product_variant_id: variantId, quantity: 1 });
+    const address = await Address.create({
+      user_id: customer._id, receiver_name: customer.name, receiver_phone: "0900000000",
+      province: "Thành phố Hồ Chí Minh", ward: "Phường Sài Gòn", address_detail: "Địa chỉ kiểm thử",
+    });
+    const quote = await request("POST", "/orders/quote", {}, customerToken);
+    assert.equal(quote.status, 200, quote.body.message);
+    const created = await request("POST", "/orders", {
+      address_id: address.id, payment_method: "SePay", expected_total: quote.body.data.final_amount,
+    }, customerToken);
+    assert.equal(created.status, 201, created.body.message);
+    const order = await Order.findById(created.body.data.order_id);
+    assert.ok(order);
+    assert.equal(order.payment_method, "SePay");
+    assert.equal((await ProductVariant.findById(variantId))?.stock_quantity, 4);
+    const checkout = (id = order.id, authToken = customerToken) =>
+      request("POST", "/payments/sepay/create", { order_id: id, amount: 1 }, authToken);
+    assert.equal((await checkout(order.id, token)).status, 404);
+    const concurrent = await Promise.all([checkout(), checkout()]);
+    assert.ok(concurrent.every((result) => result.status === 200), JSON.stringify(concurrent));
+    const qrData = concurrent[0]!.body.data;
+    assert.equal(concurrent[1]!.body.data.payment_id, qrData.payment_id);
+    assert.equal(await Payment.countDocuments({ order_id: order._id }), 1);
+    assert.equal(qrData.amount, order.final_amount);
+    assert.match(qrData.transfer_content, /^FS[0-9]{12}$/);
+    const qr = new URL(qrData.qr_url);
+    assert.equal(qr.origin, "https://qr.sepay.vn");
+    assert.equal(qr.searchParams.get("des"), qrData.transfer_content);
+    assert.equal(qr.searchParams.get("acc"), environment.SEPAY_ACCOUNT_NUMBER);
+    assert.equal(qr.searchParams.get("amount"), String(order.final_amount));
+    assert.ok(!JSON.stringify(qrData).includes(environment.SEPAY_WEBHOOK_API_KEY));
+
+    const webhookData = {
+      id: 92704, transferType: "in", gateway: environment.SEPAY_BANK_CODE,
+      accountNumber: environment.SEPAY_ACCOUNT_NUMBER, transferAmount: order.final_amount,
+      content: `THANH TOAN ${qrData.transfer_content}`, code: null,
+      referenceCode: "FT-SEPAY-TEST",
+    };
+    const notify = async (data: unknown, apiKey = environment.SEPAY_WEBHOOK_API_KEY) => {
+      const response = await fetch(base + "/payments/sepay/webhook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Apikey ${apiKey}` },
+        body: JSON.stringify(data),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    assert.equal((await notify(webhookData, "wrong-key")).status, 401);
+    assert.equal((await notify({})).status, 400);
+    for (const invalid of [
+      { ...webhookData, transferType: "out" },
+      { ...webhookData, transferAmount: order.final_amount - 1000 },
+      { ...webhookData, accountNumber: "0000000000" },
+      { ...webhookData, gateway: "ACB" },
+      { ...webhookData, content: webhookData.content + "9" },
+      { ...webhookData, content: webhookData.content + " FS123456789012" },
+    ]) {
+      assert.equal((await notify(invalid)).status, 200);
+      assert.equal((await Order.findById(order._id))?.payment_status, "pending");
+    }
+    const delivered = await Promise.all([notify(webhookData), notify(webhookData)]);
+    assert.ok(delivered.every((response) => response.status === 200 && response.body.success === true));
+    const paid = await Payment.findOne({ order_id: order._id });
+    assert.equal(paid?.status, "success");
+    assert.equal((await Order.findById(order._id))?.transaction_id, webhookData.referenceCode);
+    assert.equal((await checkout()).status, 409);
+    assert.equal((await ProductVariant.findById(variantId))?.stock_quantity, 4);
+    await notify(webhookData);
+    assert.deepEqual((await Payment.findById(paid!._id))?.paid_at, paid?.paid_at);
+
+    const nextOrder = await Order.create({
+      user_id: customer._id, total_product_amount: 200000, final_amount: 200000,
+      receiver_name: customer.name, receiver_phone: "0900000000", shipping_address: "Địa chỉ kiểm thử",
+      payment_method: "SePay",
+    });
+    const nextQR = (await checkout(nextOrder.id)).body.data;
+    const nextTransfer = { ...webhookData, transferAmount: nextOrder.final_amount, content: nextQR.transfer_content };
+    // ID webhook và mã tham chiếu đều không được dùng cho một đơn thứ hai.
+    await notify({ ...nextTransfer, referenceCode: "FT-OTHER-REFERENCE" });
+    await notify({ ...nextTransfer, id: 92705 });
+    assert.equal((await Order.findById(nextOrder._id))?.payment_status, "pending");
+
+    const fetchReal = globalThis.fetch;
+    let transactions: unknown[] = [];
+    let failedResponse = true;
+    let apiCalls = 0;
+    test.mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.origin !== "https://userapi-sandbox.sepay.vn") return fetchReal(input, init);
+      apiCalls++;
+      assert.equal(url.pathname, "/v2/transactions");
+      assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${environment.SEPAY_API_TOKEN}`);
+      assert.equal(url.searchParams.get("transaction_content"), nextQR.transfer_content);
+      if (failedResponse) return Response.json({}, { status: 503 });
+      return Response.json({ status: "success", data: transactions });
+    });
+    const reconcile = () => request("POST", `/payments/sepay/orders/${nextOrder.id}/reconcile`, undefined, customerToken);
+    const resetCheck = () => Payment.updateOne({ order_id: nextOrder._id }, { $unset: { sepay_checked_at: "" } });
+    assert.equal((await request("POST", `/payments/sepay/orders/${nextOrder.id}/reconcile`, undefined)).status, 401);
+    assert.equal((await reconcile()).status, 502);
+    assert.equal((await Order.findById(nextOrder._id))?.payment_status, "pending");
+    await resetCheck();
+    failedResponse = false;
+    const transaction = {
+      id: randomUUID(), transfer_type: "in", amount_in: nextOrder.final_amount, amount_out: 0,
+      account_number: environment.SEPAY_ACCOUNT_NUMBER, bank_brand_name: environment.SEPAY_BANK_CODE,
+      reference_number: "FT-SEPAY-SECOND", transaction_content: nextQR.transfer_content,
+    };
+    transactions = [
+      null, { ...transaction, amount_in: 1 }, { ...transaction, account_number: "0000000000" },
+      { ...transaction, transfer_type: "out" }, { ...transaction, reference_number: webhookData.referenceCode },
+    ];
+    assert.equal((await reconcile()).status, 200);
+    assert.equal((await Order.findById(nextOrder._id))?.payment_status, "pending");
+    const callsBeforeThrottle = apiCalls;
+    await reconcile();
+    assert.equal(apiCalls, callsBeforeThrottle);
+    await resetCheck();
+    transactions = [transaction];
+    assert.equal((await reconcile()).status, 200);
+    assert.equal((await Order.findById(nextOrder._id))?.payment_status, "success");
+    await notify({ ...nextTransfer, id: 92706, referenceCode: transaction.reference_number });
+    assert.equal(await Payment.countDocuments({ order_id: nextOrder._id, status: "success" }), 1);
+
+    // Localhost có thể tạo QR bằng API Token trước khi bật webhook.
+    process.env.SEPAY_BANK_CODE = "VietinBank";
+    process.env.SEPAY_WEBHOOK_API_KEY = "";
+    const vietinOrder = await Order.create({
+      user_id: customer._id, total_product_amount: 200000, final_amount: 200000,
+      receiver_name: customer.name, receiver_phone: "0900000000", shipping_address: "Địa chỉ kiểm thử",
+      payment_method: "SePay",
+    });
+    const vietinCheckout = await checkout(vietinOrder.id);
+    assert.equal(vietinCheckout.status, 200, vietinCheckout.body.message);
+    const vietinQR = vietinCheckout.body.data;
+    assert.match(vietinQR.transfer_content, /^SEVQR FS[0-9]{12}$/);
+    assert.equal(new URL(vietinQR.qr_url).searchParams.get("des"), vietinQR.transfer_content);
+    assert.equal((await notify(webhookData)).status, 503);
+    process.env.SEPAY_WEBHOOK_API_KEY = environment.SEPAY_WEBHOOK_API_KEY;
+    const vietinWebhook = await notify({
+      ...webhookData, id: 92707, gateway: "VietinBank",
+      transferAmount: vietinOrder.final_amount, content: vietinQR.transfer_content, referenceCode: "FT-VIETINBANK-TEST",
+    });
+    assert.equal(vietinWebhook.status, 200);
+    assert.equal((await Order.findById(vietinOrder._id))?.payment_status, "success");
   });
 });

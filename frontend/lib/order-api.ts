@@ -1,6 +1,6 @@
 import { API_BASE_URL, authenticatedHeaders, readApiResponse } from "./api";
 
-export type PaymentMethod = "COD" | "BankTransfer" | "VNPay" | "MoMo";
+export type PaymentMethod = "COD" | "BankTransfer" | "VNPay" | "MoMo" | "SePay";
 export type ShippingMethod = "Standard" | "Express";
 
 type CheckoutOptions = {
@@ -111,6 +111,7 @@ export const paymentMethodText: Record<PaymentMethod, string> = {
   COD: "Thanh toán khi nhận hàng (COD)",
   BankTransfer: "Chuyển khoản ngân hàng",
   VNPay: "VNPay",
+  SePay: "SePay",
   MoMo: "Ví MoMo",
 };
 

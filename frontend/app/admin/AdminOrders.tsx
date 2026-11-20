@@ -253,6 +253,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
               <option value="COD">Thanh toán COD</option>
               <option value="BankTransfer">Chuyển khoản (BankTransfer)</option>
               <option value="VNPay">Cổng VNPay</option>
+              <option value="SePay">SePay</option>
               <option value="MoMo">Ví MoMo</option>
             </select>
           </div>

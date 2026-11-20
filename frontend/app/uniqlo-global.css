@@ -822,5 +822,27 @@ html { scroll-behavior: smooth; scroll-padding-top: 106px; }
 .payment-result-details > div { display: flex; justify-content: space-between; gap: 8px; text-align: left; }
 .payment-result-details dd { margin: 0; font-weight: 700; text-align: right; overflow-wrap: anywhere; }
 .payment-result-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+
+.sepay-payment-frame { max-width: 920px; margin: 0 auto; padding: 28px 0 56px; }
+.sepay-payment-heading { margin-bottom: 24px; }
+.sepay-payment-heading > a { font-size: 14px; }
+.sepay-payment-heading h1 { margin-bottom: 10px; }
+.sepay-payment-card { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); overflow: hidden; }
+.sepay-qr-column, .sepay-details-column { padding: clamp(22px, 4vw, 36px); }
+.sepay-qr-column { display: flex; flex-direction: column; align-items: center; background: var(--canvas); text-align: center; }
+.sepay-payment-amount { font-size: clamp(25px, 3vw, 34px); color: var(--red); }
+.sepay-qr-image { width: min(100%, 280px); height: auto; margin-block: 20px 8px; border: 12px solid #fff; border-radius: 16px; background: #fff; }
+.sepay-details-column h2 { margin-top: 0; font-size: 20px; }
+.sepay-bank-details { display: grid; gap: 18px; margin-block: 24px; }
+.sepay-bank-details dt { margin-bottom: 5px; color: var(--muted); font-size: 13px; }
+.sepay-bank-details dd { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.sepay-bank-details button { margin-left: auto; border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; background: var(--surface); color: var(--red); font: inherit; font-size: 12px; cursor: pointer; }
+.sepay-payment-status { padding: 12px 14px; border-radius: 10px; background: #f8ecd4; color: #79522e; font-size: 14px; }
+.sepay-payment-error { padding: 24px; }
+.sepay-qr-error { max-width: 280px; margin-block: 36px; font-size: 14px; }
+@media (max-width: 640px) {
+  .sepay-payment-card { grid-template-columns: minmax(0, 1fr); }
+  .sepay-bank-details dd { font-size: 14px; }
+}
 .size-suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
 .size-suggestions strong { min-width: 46px; padding: 8px 12px; border-radius: 12px; background: var(--accent-soft); color: var(--red); font-size: 19px; text-align: center; }

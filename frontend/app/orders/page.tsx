@@ -191,7 +191,7 @@ export default function BackendOrdersPage() {
         <div style={{ display: "grid", gap: 18 }}>
           {filteredOrders.map((order) => {
             const canContinuePayment =
-              order.order_status === "pending" && order.payment_status === "pending";
+              order.order_status === "pending" && order.payment_status === "pending" && order.payment_method !== "COD";
             const canCancel =
               order.order_status === "pending" &&
               order.payment_method === "COD" &&
@@ -326,9 +326,7 @@ export default function BackendOrdersPage() {
                       </Link>
                     )}
 
-                    {/* Tiếp tục thanh toán MoMo / VNPay */}
-                    {canContinuePayment &&
-                      (order.payment_method === "MoMo" || order.payment_method === "VNPay") && (
+                    {canContinuePayment && order.payment_method !== "BankTransfer" && (
                         <button
                           type="button"
                           className="pill-button dark small-pill"

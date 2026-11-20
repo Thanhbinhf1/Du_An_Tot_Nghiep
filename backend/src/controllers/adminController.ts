@@ -428,7 +428,7 @@ export class AdminController {
       if (statusFilter && ["pending", "success", "failed"].includes(statusFilter)) {
         filter.status = statusFilter;
       }
-      if (methodFilter && ["VNPay", "MoMo", "BankTransfer"].includes(methodFilter)) {
+      if (methodFilter && ["VNPay", "SePay", "MoMo", "BankTransfer"].includes(methodFilter)) {
         filter.payment_method = methodFilter;
       }
 

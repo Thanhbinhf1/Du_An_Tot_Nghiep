@@ -13,7 +13,7 @@ export interface IOrder extends Document {
   shipping_method: string;
   tracking_number?: string;
   estimated_delivery?: Date;
-  payment_method: "COD" | "VNPay" | "MoMo" | "BankTransfer";
+  payment_method: "COD" | "VNPay" | "SePay" | "MoMo" | "BankTransfer";
   payment_status: "pending" | "success" | "failed" | "refunded";
   order_status:
     | "pending"
@@ -51,7 +51,7 @@ const orderSchema = new Schema<IOrder>(
     // Trạng thái đơn và thanh toán
     payment_method: {
       type: String,
-      enum: ["COD", "VNPay", "MoMo", "BankTransfer"],
+      enum: ["COD", "VNPay", "SePay", "MoMo", "BankTransfer"],
       required: true,
     },
     payment_status: {

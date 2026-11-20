@@ -70,6 +70,7 @@ function CheckoutContent({ token }: { token: string }) {
   const availableMethods = methods.filter((method) => {
     if (quote?.final_amount === 0) return method === "COD";
     if (method === "MoMo" && quote) return quote.final_amount >= 1_000 && quote.final_amount <= 50_000_000;
+    if (method === "SePay" && quote) return Number.isSafeInteger(quote.final_amount);
     return true;
   });
   const paymentMethod = availableMethods.includes(preferredPaymentMethod) ? preferredPaymentMethod : "COD";

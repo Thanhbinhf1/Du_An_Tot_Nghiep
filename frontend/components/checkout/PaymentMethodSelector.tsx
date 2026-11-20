@@ -5,7 +5,7 @@ import type { PaymentMethod } from "@/lib/order-api";
 const methods: { value: PaymentMethod; label: string; description: string }[] = [
   { value: "COD", label: "Thanh toán khi nhận hàng (COD)", description: "Trả tiền khi nhận được đơn hàng." },
   { value: "BankTransfer", label: "Chuyển khoản ngân hàng", description: "Thông tin tài khoản và nội dung chuyển khoản hiển thị sau khi tạo đơn." },
-  { value: "VNPay", label: "Cổng thanh toán VNPay", description: "Mở trang VNPay để thanh toán bằng phương thức bạn chọn." },
+  { value: "SePay", label: "Thanh toán QR qua SePay", description: "Quét mã QR bằng ứng dụng ngân hàng. Đơn hàng tự cập nhật khi nhận được tiền." },
   { value: "MoMo", label: "Ví điện tử MoMo", description: "Mở cổng MoMo để xác nhận thanh toán." },
 ];
 

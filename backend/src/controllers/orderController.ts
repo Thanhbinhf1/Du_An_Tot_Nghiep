@@ -157,7 +157,7 @@ export class OrderController {
       if (
         payment_method !== "COD" &&
         payment_method !== "BankTransfer" &&
-        payment_method !== "VNPay" &&
+        payment_method !== "SePay" &&
         payment_method !== "MoMo"
       ) {
         throw new AppError("Phương thức thanh toán không hợp lệ", 400);
@@ -287,6 +287,9 @@ export class OrderController {
         }
         if (payment_method === "MoMo" && (price.final_amount < 1_000 || price.final_amount > 50_000_000)) {
           throw new AppError("MoMo không hỗ trợ tổng tiền đơn hàng này.", 400);
+        }
+        if (payment_method === "SePay" && !Number.isSafeInteger(price.final_amount)) {
+          throw new AppError("SePay yêu cầu tổng tiền là số nguyên VNĐ.", 400);
         }
         if (price.couponId) {
           await Coupon.updateOne({ _id: price.couponId }, { $inc: { used_count: 1 } }, { session });

@@ -14,7 +14,7 @@ type PaymentRecord = {
     payment_method: string;
     created_at: string;
   } | null;
-  payment_method: "VNPay" | "MoMo" | "BankTransfer";
+  payment_method: "VNPay" | "SePay" | "MoMo" | "BankTransfer";
   transaction_id: string;
   status: "pending" | "success" | "failed";
   paid_at?: string | null;
@@ -63,7 +63,7 @@ export default function AdminPayments({ request }: { request: AdminRequest }) {
           <div>
             <h2>Quản lý giao dịch thanh toán & Đối soát</h2>
             <p className="admin-muted">
-              Kiểm tra tình trạng thanh toán qua BankTransfer, VNPay, MoMo ({payments.length} giao dịch).
+              Kiểm tra tình trạng thanh toán qua BankTransfer, VNPay, SePay, MoMo ({payments.length} giao dịch).
             </p>
           </div>
           <button
@@ -111,6 +111,7 @@ export default function AdminPayments({ request }: { request: AdminRequest }) {
               <option value="all">Tất cả cổng</option>
               <option value="BankTransfer">Chuyển khoản (BankTransfer)</option>
               <option value="VNPay">Cổng VNPay</option>
+              <option value="SePay">SePay</option>
               <option value="MoMo">Ví MoMo</option>
             </select>
           </div>

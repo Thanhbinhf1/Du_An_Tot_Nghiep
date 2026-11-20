@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useDemoAuth } from "@/lib/demo-auth";
-import { getOrderPayments, type PaymentStatus } from "@/lib/payment-api";
+import { getOrderPayments, reconcileSePayOrder, type PaymentStatus } from "@/lib/payment-api";
 import { getBackendOrder, paymentMethodText } from "@/lib/order-api";
 import { formatVnd } from "@/data/products";
 
@@ -50,10 +50,14 @@ function PaymentResultContent({ orderId, token }: { orderId: string | null; toke
 
     async function refresh(remaining: number) {
       try {
-        const data = await getOrderPayments(id, token);
+        let data = await getOrderPayments(id, token);
+        const method = data.payments[0]?.payment_method;
+        if (active && method === "SePay" && data.order_payment_status === "pending" && remaining % 5 === 0) {
+          await reconcileSePayOrder(id, token).catch(() => undefined);
+          if (active) data = await getOrderPayments(id, token);
+        }
         if (!active) return;
         const status = data.order_payment_status;
-        const method = data.payments[0]?.payment_method;
         setResult({ status, method: method ? paymentMethodText[method] : undefined });
 
         if (status === "success") {
