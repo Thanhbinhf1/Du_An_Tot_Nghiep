@@ -10,7 +10,7 @@ export default function AuthShell({ children }: { children: ReactNode }) {
         <section className={styles.formPanel}>
           <div className={styles.form}>
             <Link className={styles.brand} href="/" aria-label="Trang chủ F.Style">
-              <Image className={styles.logo} src="/logo-vcs.png" alt="F.Style" width={68} height={60} />
+              <Image className={styles.logo} src="/logo-vsc.png" alt="VSC_BAPD" width={68} height={60} />
             </Link>
             {children}
           </div>

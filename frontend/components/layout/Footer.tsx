@@ -5,9 +5,9 @@ export default function Footer() {
     <footer className="footer">
       <div className="footer-columns">
         <section>
-          <strong>Giới thiệu F.Style</strong>
+          <strong>Giới thiệu VSC_BAPD</strong>
           <p className="footer-about-text">
-            F.Style là thương hiệu thời trang hiện đại mang đến các thiết kế tối giản,
+            VSC_BAPD là thương hiệu thời trang hiện đại mang đến các thiết kế tối giản,
             chất liệu thoải mái và dễ dàng phối đồ cho Nam, Nữ và Trẻ em mỗi ngày.
           </p>
           <div className="footer-links">
@@ -44,26 +44,26 @@ export default function Footer() {
         <section>
           <strong>Kết nối mạng xã hội</strong>
           <p className="footer-about-text">
-            Theo dõi F.Style để cập nhật bộ sưu tập mới và ưu đãi độc quyền mỗi tuần.
+            Theo dõi VSC_BAPD để cập nhật bộ sưu tập mới và ưu đãi độc quyền mỗi tuần.
           </p>
-          <div className="footer-social-links" aria-label="Mạng xã hội F.Style">
-            <a href="https://facebook.com" target="_blank" rel="noreferrer" aria-label="Facebook F.Style">
+          <div className="footer-social-links" aria-label="Mạng xã hội VSC_BAPD">
+            <a href="https://www.facebook.com/share/1Dc9YM3Mi7/?mibextid=wwXIfr" target="_blank" rel="noreferrer" aria-label="Facebook VSC_BAPD">
               Facebook
             </a>
-            <a href="https://instagram.com" target="_blank" rel="noreferrer" aria-label="Instagram F.Style">
+            <a href="https://www.facebook.com/share/1Dc9YM3Mi7/?mibextid=wwXIfr" target="_blank" rel="noreferrer" aria-label="Instagram VSC_BAPD">
               Instagram
             </a>
-            <a href="https://tiktok.com" target="_blank" rel="noreferrer" aria-label="TikTok F.Style">
+            <a href="https://www.facebook.com/share/1Dc9YM3Mi7/?mibextid=wwXIfr" target="_blank" rel="noreferrer" aria-label="TikTok VSC_BAPD">
               TikTok
             </a>
-            <a href="https://youtube.com" target="_blank" rel="noreferrer" aria-label="YouTube F.Style">
+            <a href="https://www.facebook.com/share/1Dc9YM3Mi7/?mibextid=wwXIfr" target="_blank" rel="noreferrer" aria-label="YouTube VSC_BAPD">
               YouTube
             </a>
           </div>
         </section>
       </div>
       <div className="footer-bottom">
-        <p className="footer-copy">© 2026 F.Style Store — Mặc đẹp mỗi ngày. Bảo lưu mọi quyền.</p>
+        <p className="footer-copy">© 2026 VSC_BAPD Store — Mặc đẹp mỗi ngày. Bảo lưu mọi quyền.</p>
       </div>
     </footer>
   );

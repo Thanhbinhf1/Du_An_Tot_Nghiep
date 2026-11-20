@@ -56,7 +56,7 @@ export type ApiProduct = {
   createdAt?: string;
   category_id: string | Pick<ApiCategory, "_id" | "name" | "slug"> | null;
   brand_id?: string | Pick<ApiBrand, "_id" | "name" | "slug"> | null;
-  images: { image_url: string; is_primary: boolean }[];
+  images: { image_url: string; is_primary: boolean; color?: string }[];
   variants: ProductVariant[];
 };
 
@@ -72,8 +72,11 @@ export function mapApiProduct(product: ApiProduct): Product & { variants: Produc
   const pricedVariants = available.length ? available : variants;
   const primaryImage = product.images?.find((entry) => entry.is_primary) ?? product.images?.[0];
   const allImages = (product.images ?? [])
-    .map((entry) => resolveProductImage(entry.image_url))
-    .filter(Boolean);
+    .map((entry) => ({
+      url: resolveProductImage(entry.image_url),
+      ...(entry.color?.trim() ? { color: entry.color.trim() } : {}),
+    }))
+    .filter((entry) => Boolean(entry.url));
   const legacyImage = product.image ? resolveProductImage(product.image) : "";
 
   const effectivePrice = pricedVariants.length
@@ -103,7 +106,7 @@ export function mapApiProduct(product: ApiProduct): Product & { variants: Produc
     originalPrice: originalPrice > effectivePrice ? originalPrice : undefined,
     discountPercent: discountPercent > 0 ? discountPercent : undefined,
     image: primaryImage ? resolveProductImage(primaryImage.image_url) : legacyImage,
-    images: allImages.length ? allImages : legacyImage ? [legacyImage] : [],
+    images: allImages.length ? allImages : legacyImage ? [{ url: legacyImage }] : [],
     category: typeof product.category_id === "object" ? product.category_id?.name ?? "" : "",
     categoryId: typeof product.category_id === "string" ? product.category_id : product.category_id?._id,
     categorySlug: typeof product.category_id === "object" ? product.category_id?.slug : undefined,

@@ -9,8 +9,13 @@ import Footer from "@/components/layout/Footer";
 import { WishlistProvider } from "@/lib/wishlist";
 
 export const metadata: Metadata = {
-  title: "F.Style Store",
+  title: "VSC_BAPD Store",
   description: "Cửa hàng thời trang F.Style",
+  icons: {
+    icon: "/logo-vsc.png",
+    shortcut: "/logo-vsc.png",
+    apple: "/logo-vsc.png",
+  },
 };
 
 export default function RootLayout({

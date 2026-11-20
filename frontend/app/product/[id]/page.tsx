@@ -98,14 +98,6 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
   const wishlist = useWishlist();
   const { products } = useCatalogProducts();
 
-  // Danh sách ảnh gallery (ảnh chính + ảnh phụ)
-  const galleryImages = useMemo(() => {
-    const base = [product.image, ...(product.images ?? [])];
-    return [...new Set(base.filter(Boolean))];
-  }, [product.image, product.images]);
-
-  const currentImage = galleryImages[activeImageIndex] ?? product.image ?? "";
-
   useEffect(() => {
     if (!zoomOpen) return;
     function closeOnEscape(event: KeyboardEvent) {
@@ -120,6 +112,16 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
   const activeColor = variant?.color ?? selectedColor ?? colors[0] ?? "";
   const sizesForColor = product.variants.filter((item) => item.color === activeColor);
   const stock = variant?.stock_quantity ?? 0;
+
+  const productImages = product.images ?? [];
+  const colorImages = productImages.filter((image) => image.color === activeColor);
+  const unassignedImages = productImages.filter((image) => !image.color);
+  const visibleImages = !activeColor
+    ? productImages
+    : colorImages.length ? colorImages : unassignedImages;
+  const galleryImages = [...new Set(visibleImages.map((image) => image.url).filter(Boolean))];
+
+  const currentImage = galleryImages[activeImageIndex] ?? "";
 
   // Giá gốc, giá giảm & % giảm
   const displayVariant = variant ?? sizesForColor[0] ?? firstVariant;
@@ -155,6 +157,7 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
 
   function handleColorChange(nextColor: string) {
     setSelectedColor(nextColor);
+    setActiveImageIndex(0);
     const options = product.variants.filter((item) => item.color === nextColor);
     const next =
       options.find((item) => item.size === variant?.size && item.stock_quantity > 0) ??
@@ -232,7 +235,7 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
                 </button>
               ))
             ) : (
-              <p className="empty-state">Chưa có ảnh sản phẩm</p>
+              <p className="empty-state">{activeColor ? `Chưa có ảnh cho màu ${activeColor}` : "Chưa có ảnh sản phẩm"}</p>
             )}
           </div>
         </div>
