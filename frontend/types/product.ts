@@ -10,7 +10,7 @@ export type Product = {
   originalPrice?: number;
   discountPercent?: number;
   image: string;
-  images?: string[];
+  images?: { url: string; color?: string }[];
   category: string;
   categoryId?: string;
   categorySlug?: string;

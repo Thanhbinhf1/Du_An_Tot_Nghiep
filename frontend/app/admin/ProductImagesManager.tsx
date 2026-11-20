@@ -2,22 +2,32 @@ import { useEffect, useState, type FormEvent } from "react";
 import { resolveProductImage } from "@/lib/api";
 import type { AdminRequest } from "./ProductVariantsManager";
 
-type ProductImage = { _id: string; image_url: string; display_order: number; is_primary: boolean };
+type ProductImage = { _id: string; image_url: string; color?: string; display_order: number; is_primary: boolean };
+type ProductVariant = { color: string };
 
 export default function ProductImagesManager({ productId, request }: { productId: string; request: AdminRequest }) {
   const [images, setImages] = useState<ProductImage[]>();
+  const [colors, setColors] = useState<string[]>([]);
   const [url, setUrl] = useState("");
+  const [color, setColor] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const path = `/products/${productId}/images`;
 
   useEffect(() => {
     const controller = new AbortController();
-    request<ProductImage[]>(path, { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) setImages(data); })
+    Promise.all([
+      request<ProductImage[]>(path, { signal: controller.signal }),
+      request<ProductVariant[]>(`/products/${productId}/variants/admin`, { signal: controller.signal }),
+    ])
+      .then(([data, variants]) => {
+        if (controller.signal.aborted) return;
+        setImages(data);
+        setColors([...new Set(variants.map((variant) => variant.color.trim()).filter(Boolean))]);
+      })
       .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không thể tải ảnh."); });
     return () => controller.abort();
-  }, [path, request]);
+  }, [path, productId, request]);
 
   async function mutate(action: () => Promise<void>) {
     if (!images || busy) return;
@@ -48,10 +58,11 @@ export default function ProductImagesManager({ productId, request }: { productId
       if (!imageUrl) throw new Error("Chọn tệp hoặc nhập đường dẫn ảnh.");
       const displayOrder = (images ?? []).reduce((last, image) => Math.max(last, image.display_order), 0) + 1;
       await request(path, { method: "POST", body: JSON.stringify({
-        image_url: imageUrl, display_order: displayOrder, is_primary: !images?.length,
+        image_url: imageUrl, color: color || undefined, display_order: displayOrder, is_primary: !images?.length,
       }) });
       form.reset();
       setUrl("");
+      setColor("");
     });
   }
 
@@ -63,6 +74,21 @@ export default function ProductImagesManager({ productId, request }: { productId
       {images?.map((image) => (
         <div key={image._id} className="admin-actions">
           <a href={resolveProductImage(image.image_url)} target="_blank" rel="noreferrer">Ảnh {image.display_order}</a>
+          <label className="admin-image-color">
+            Màu ảnh
+            <select value={image.color ?? ""} disabled={busy} onChange={(event) => {
+              const nextColor = event.currentTarget.value;
+              void mutate(async () => {
+                await request(`${path}/${image._id}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({ color: nextColor }),
+                });
+              });
+            }}>
+              <option value="">Chưa gán (dùng cho mọi màu)</option>
+              {colors.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
           {image.is_primary ? <span>Ảnh chính</span> : (
             <button type="button" disabled={busy} onClick={() => void mutate(async () => {
               await request(`${path}/${image._id}`, { method: "PATCH", body: JSON.stringify({ is_primary: true }) });
@@ -80,6 +106,10 @@ export default function ProductImagesManager({ productId, request }: { productId
           <legend>Thêm ảnh</legend>
           <label>Tệp JPG, PNG hoặc WEBP, tối đa 5 MB<input name="image" type="file" accept="image/jpeg,image/png,image/webp" /></label>
           <label>Đường dẫn ảnh<input value={url} onChange={(event) => setUrl(event.target.value)} /></label>
+          <label>Màu sắc<select value={color} onChange={(event) => setColor(event.target.value)}>
+            <option value="">Chưa gán (dùng cho mọi màu)</option>
+            {colors.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select></label>
           <div className="admin-actions"><button className="admin-button">Thêm ảnh</button></div>
         </fieldset>
       </form>

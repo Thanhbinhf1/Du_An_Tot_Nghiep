@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import type { HydratedDocument } from "mongoose";
 import jwt from "jsonwebtoken";
 import User from "../models/userModel.js";
 import type { IUser } from "../models/userModel.js";
@@ -6,7 +7,7 @@ import { AppError } from "./AppError.js";
 import type { UserRole } from "../types/auth.js";
 
 export interface AuthRequest extends Request {
-  user?: IUser;
+  user?: HydratedDocument<IUser>;
 }
 
 export const protect = async (

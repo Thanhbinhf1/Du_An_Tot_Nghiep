@@ -62,7 +62,7 @@ export class ProductImageController {
   static async createImage(req: Request, res: Response, next: NextFunction) {
     try {
       const productId = getValidId(req.params.productId, "ID sản phẩm");
-      const { image_url, display_order, is_primary = false } = req.body;
+      const { image_url, color, display_order, is_primary = false } = req.body;
 
       const product = await Product.findById(productId);
       if (!product) throw new AppError("Không tìm thấy sản phẩm", 404);
@@ -79,6 +79,10 @@ export class ProductImageController {
         throw new AppError("is_primary phải là boolean", 400);
       }
 
+      if (color !== undefined && typeof color !== "string") {
+        throw new AppError("Màu ảnh không hợp lệ", 400);
+      }
+
       if (is_primary) {
         await ProductImage.updateMany(
           { product_id: productId },
@@ -89,6 +93,7 @@ export class ProductImageController {
       const image = await ProductImage.create({
         product_id: productId,
         image_url,
+        ...(typeof color === "string" && color.trim() ? { color: color.trim() } : {}),
         display_order,
         is_primary,
       });
@@ -115,13 +120,22 @@ export class ProductImageController {
 
       if (!image) throw new AppError("Không tìm thấy ảnh", 404);
 
-      const { image_url, display_order, is_primary } = req.body;
+      const { image_url, color, display_order, is_primary } = req.body;
 
       if (image_url !== undefined) {
         if (typeof image_url !== "string" || !image_url.trim()) {
           throw new AppError("Đường dẫn ảnh không hợp lệ", 400);
         }
         image.image_url = image_url.trim();
+      }
+
+      if (color !== undefined) {
+        if (typeof color !== "string") {
+          throw new AppError("Màu ảnh không hợp lệ", 400);
+        }
+        const normalizedColor = color.trim();
+        if (normalizedColor) image.color = normalizedColor;
+        else image.set("color", undefined);
       }
 
       if (display_order !== undefined) {

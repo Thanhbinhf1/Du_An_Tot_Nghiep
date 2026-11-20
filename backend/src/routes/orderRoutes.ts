@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { protect } from "../middlewares/authMiddleware.js";
 import { OrderController } from "../controllers/orderController.js";
+import { LegacyOrderController } from "../controllers/legacyOrderController.js";
 
 const router = Router();
 
@@ -8,8 +9,14 @@ router.use(protect);
 
 // Khách hàng
 router.get("/my", OrderController.getMyOrders);
+router.get("/mine", LegacyOrderController.getMine);
 router.post("/quote", OrderController.quoteCheckout);
-router.post("/", OrderController.createOrder);
+router.post("/", (req, res, next) => {
+  if (req.body?.address_id === undefined && req.body?.items !== undefined) {
+    return LegacyOrderController.create(req, res, next);
+  }
+  return OrderController.createOrder(req, res, next);
+});
 router.patch("/:id/cancel", OrderController.cancelOrder);
 
 // Admin

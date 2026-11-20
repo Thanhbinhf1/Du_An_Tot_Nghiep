@@ -3,7 +3,8 @@ import mongoose, { Document, Schema, Types } from "mongoose";
 export interface IOrderDetail extends Document {
   order_id: Types.ObjectId;
   product_id?: Types.ObjectId;
-  product_variant_id: Types.ObjectId; // Giữ lại để biết đã trừ kho thằng nào
+  product_variant_id?: Types.ObjectId | null;
+  storefront_product_id?: Types.ObjectId | null;
   outfit_id?: Types.ObjectId | null; // Đánh dấu để tính % combo
   product_name: string; // TÊN LÚC MUA
   sku: string; // SKU LÚC MUA
@@ -20,8 +21,10 @@ const orderDetailSchema = new Schema<IOrderDetail>(
     product_variant_id: {
       type: Schema.Types.ObjectId,
       ref: "ProductVariant",
-      required: true,
+      default: null,
+      required(this: IOrderDetail) { return !this.storefront_product_id; },
     },
+    storefront_product_id: { type: Schema.Types.ObjectId, ref: "StorefrontProduct", default: null },
     outfit_id: { type: Schema.Types.ObjectId, ref: "Outfit", default: null },
 
     // Hardcopy Data (Không bao giờ thay đổi dù Admin đổi giá)

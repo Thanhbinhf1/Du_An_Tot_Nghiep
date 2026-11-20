@@ -75,6 +75,48 @@ const DEFAULT_STORE_SETTINGS = {
 };
 
 export class AdminController {
+  static async getUsers(_req: Request, res: Response, next: NextFunction) {
+    try {
+      const users = await User.find()
+        .select("name email phone role is_blocked auth_provider createdAt")
+        .sort({ createdAt: -1 })
+        .limit(500)
+        .lean();
+      res.json({ status: "success", data: users });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async updateUserStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!mongoose.isValidObjectId(req.params.id)) {
+        throw new AppError("Tài khoản không hợp lệ.", 400);
+      }
+      if (typeof req.body?.is_blocked !== "boolean") {
+        throw new AppError("Trạng thái tài khoản không hợp lệ.", 400);
+      }
+
+      const user = await User.findById(req.params.id);
+      if (!user) throw new AppError("Không tìm thấy tài khoản.", 404);
+      if (user.role === "admin") {
+        throw new AppError("Không thể khóa hoặc mở khóa tài khoản quản trị.", 403);
+      }
+
+      user.is_blocked = req.body.is_blocked;
+      await user.save();
+      res.json({
+        status: "success",
+        data: {
+          _id: user._id,
+          is_blocked: user.is_blocked,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // 1. DASHBOARD & THỐNG KÊ TỔNG QUAN
   static async getDashboardStats(_req: Request, res: Response, next: NextFunction) {
     try {

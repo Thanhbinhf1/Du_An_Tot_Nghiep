@@ -6,6 +6,7 @@ import mongoose, { Document, Schema, Types } from "mongoose";
 export interface IProductImage extends Document {
   product_id: Types.ObjectId;
   image_url: string;
+  color?: string;
   display_order: number;
   is_primary: boolean;
 }
@@ -23,6 +24,10 @@ const productImageSchema = new Schema<IProductImage>(
     image_url: {
       type: String,
       required: [true, "Link hình ảnh là bắt buộc"],
+      trim: true,
+    },
+    color: {
+      type: String,
       trim: true,
     },
     display_order: {

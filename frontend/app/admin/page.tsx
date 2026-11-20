@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { API_BASE_URL, authenticatedHeaders, readApiEnvelope, readApiResponse } from "@/lib/api";
@@ -273,7 +274,7 @@ export default function AdminPage() {
       {/* SIDEBAR NAVIGATION */}
       <aside className="admin-sidebar">
         <Link className="admin-brand" href="/" aria-label="F.Style Store - về cửa hàng">
-          <span className="admin-brand-name">F.Style</span>
+          <Image className="admin-brand-logo" src="/logo-vsc.png" alt="VSC_BAPD" width={46} height={46} />
           <small>Quản trị</small>
         </Link>
 

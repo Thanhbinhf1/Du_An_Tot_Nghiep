@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import CategoryTiles from "@/components/product/CategoryTiles";
@@ -105,7 +106,7 @@ export default function Header() {
     <header ref={header} className={`header storefront-header${home ? " header-home" : ""}${overlay ? " header-overlay" : ""}${scrolled ? " header-scrolled" : ""}`}>
       <div className="nav site-nav">
         <Link href="/" className="logo" aria-label="Trang chủ F.Style" onClick={closeMenus}>
-          <span className="logo-brand-text">F<span>.</span>Style</span>
+          <Image src="/logo-vsc.png" alt="VSC_BAPD" width={54} height={54} />
         </Link>
 
         <nav
@@ -124,7 +125,10 @@ export default function Header() {
           }}
         >
           {rootCategories.map((category) => {
-            const menu = getAudienceCategories(categories, category);
+            const audienceCategories = getAudienceCategories(categories, category);
+            const menu = category.slug === "nam"
+              ? audienceCategories.filter((item) => item.slug !== "chan-vay" && item.slug !== "vay")
+              : audienceCategories;
             if (!menu.length) {
               return (
                 <Link

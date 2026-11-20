@@ -77,6 +77,8 @@ router.patch("/inventory/:id", AdminController.updateInventoryStock);
 
 // 4. Customers & Users (Role change & block are Admin-only)
 router.get("/customers", AdminController.getCustomers);
+router.get("/users", requireAdmin, AdminController.getUsers);
+router.patch("/users/:id/status", requireAdmin, AdminController.updateUserStatus);
 router.patch("/customers/:id/role", requireAdmin, AdminController.updateCustomerRole);
 router.patch("/customers/:id/block", requireAdmin, AdminController.toggleCustomerBlock);
 

@@ -114,7 +114,8 @@ export class OrderController {
     if (!items.length) return [];
     const legacyVariantIds = items
       .filter((item) => !item.product_id)
-      .map((item) => item.product_variant_id);
+      .map((item) => item.product_variant_id)
+      .filter((id) => id != null);
     const variants = legacyVariantIds.length
       ? await ProductVariant.find({ _id: { $in: legacyVariantIds } }).select("product_id").lean()
       : [];
@@ -476,6 +477,10 @@ export class OrderController {
             throw new AppError("Số lượng trong đơn hàng không hợp lệ", 409);
           }
 
+          if (!item.product_variant_id) {
+            if (item.storefront_product_id) continue;
+            throw new AppError("Không tìm thấy biến thể trong đơn hàng", 409);
+          }
           const variantId = String(item.product_variant_id);
           const total = (quantities.get(variantId) ?? 0) + item.quantity;
 
