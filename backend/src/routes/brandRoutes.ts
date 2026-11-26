@@ -1,9 +1,11 @@
 import { Router } from "express";
+import { normalizeRequestBody } from "../middlewares/requestBodyMiddleware.js";
 import { BrandController } from "../controllers/brandController.js";
 import { protect } from "../middlewares/authMiddleware.js";
 import { requireAdmin } from "../middlewares/adminMiddleware.js";
 
 const router = Router();
+router.use(normalizeRequestBody);
 
 router.get("/", BrandController.getBrands);
 router.get("/:id", BrandController.getBrand);

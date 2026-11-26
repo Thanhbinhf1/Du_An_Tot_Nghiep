@@ -26,6 +26,16 @@ import ReviewReport from "../src/models/reviewReportModel.js";
 import Address from "../src/models/addressModel.js";
 import Cart from "../src/models/cartModel.js";
 import CartDetail from "../src/models/cartDetailModel.js";
+import PasswordReset from "../src/models/passwordResetModel.js";
+import PasswordResetLimit from "../src/models/passwordResetLimitModel.js";
+import { EmailService } from "../src/services/emailService.js";
+import { ContactController } from "../src/controllers/contactController.js";
+import { OAuth2Client } from "google-auth-library";
+import ProductImage from "../src/models/productImageModel.js";
+import ProductComment from "../src/models/productCommentModel.js";
+import OrderReturn from "../src/models/orderReturnModel.js";
+import InventoryMovement from "../src/models/inventoryMovementModel.js";
+import BlockedWord from "../src/models/blockedWordModel.js";
 
 dotenv.config({ quiet: true });
 const databaseName = `pv_test_${randomUUID().replaceAll("-", "").slice(0, 24)}`;
@@ -55,7 +65,7 @@ before(async () => {
     throw new Error(`Không kết nối được MongoDB (${error instanceof Error ? error.name : "unknown"})`);
   }
   assert.equal(mongoose.connection.name, databaseName);
-  await Promise.all([User, Category, Brand, Product, ProductVariant, Payment, ReviewReport].map((model) => model.createIndexes()));
+  await Promise.all([User, Category, Brand, Product, ProductVariant, Payment, ReviewReport, PasswordReset, PasswordResetLimit, OrderReturn, InventoryMovement, BlockedWord].map((model) => model.createIndexes()));
   process.env.JWT_SECRET = randomUUID();
   await User.create({ name: "Integration Admin", email: "admin@variant-test.invalid", password: await bcrypt.hash(password, 10), role: "admin" });
 
@@ -67,6 +77,7 @@ before(async () => {
   app.use("/api/payments", paymentRoutes);
   app.use("/api/reviews", reviewRoutes);
   app.use("/api/products", productRoutes);
+  app.post("/api/contact", ContactController.create);
   app.post("/mock-momo", (req, res) => {
     const { partnerCode, orderId, requestId, amount } = req.body;
     momoAttempts.push({ orderId, requestId, amount });
@@ -161,6 +172,13 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     assert.equal(saved.size, "M");
     assert.equal(saved.color, "Đen");
     assert.equal(saved.stock_quantity, 10);
+    // API-created products now start as drafts. Publish complete QA fixtures explicitly.
+    for (const id of [productId,otherProductId]) {
+      if(id===otherProductId) assert.equal((await request('POST','/products/'+id+'/variants',{sku:'OTHER-BASE',size:'M',color:'X',price:100000,stock_quantity:1},token)).status,201);
+      assert.equal((await request('POST','/products/'+id+'/images',{image_url:'/uploads/fixture.png',is_primary:true,display_order:1},token)).status,201);
+      const productVersion=(await Product.findById(id))?.get('__v')??0;
+      assert.equal((await request('PATCH','/products/'+id,{status:true,product_code:id===productId?'TEST-SHIRT':'OTHER-SHIRT',expected_version:productVersion},token)).status,200);
+    }
     const list = await request("GET", variantsPath());
     assert.equal(list.status, 200);
     assert.equal(list.body.data.length, 1);
@@ -172,7 +190,7 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     const response = await request("POST", variantsPath(), { ...valid, sku: "TEST-L-BLACK", size: "L" }, token);
     assert.equal(response.status, 201);
     secondVariantId = response.body.data._id;
-    assert.equal((await request("PATCH", `${variantsPath()}/${secondVariantId}`, { size: "M" }, token)).status, 409);
+    assert.equal((await request("PATCH", `${variantsPath()}/${secondVariantId}`, { size: "M", expected_version: (await ProductVariant.findById(secondVariantId))?.get("__v") ?? 0 }, token)).status, 409);
     assert.equal((await ProductVariant.findById(secondVariantId))?.size, "L");
   });
 
@@ -195,12 +213,15 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
   });
 
   await t.test("sửa giá, bỏ giá khuyến mãi và cho tồn kho bằng 0", async () => {
-    const response = await request("PATCH", `${variantsPath()}/${variantId}`, { price: 200000, sale_price: null, stock_quantity: 0 }, token);
+    const current = await ProductVariant.findById(variantId);
+    const response = await request("PATCH", `${variantsPath()}/${variantId}`, { price: 200000, sale_price: null, expected_version: current?.get("__v") ?? 0 }, token);
     assert.equal(response.status, 200);
     const saved = await ProductVariant.findById(variantId);
     assert.equal(saved?.price, 200000);
     assert.equal(saved?.sale_price, null);
-    assert.equal(saved?.stock_quantity, 0);
+    assert.equal(saved?.stock_quantity,10);
+    const inventory=await request('POST','/admin/inventory/'+variantId+'/adjustment',{mode:'set',quantity:0,expected_version:saved?.get('__v')??0,note:'QA kiểm kê về0'},token);
+    assert.equal(inventory.status,200);assert.equal((await ProductVariant.findById(variantId))?.stock_quantity,0);
   });
 
   await t.test("biến thể không thuộc sản phẩm và ID không hợp lệ", async () => {
@@ -222,7 +243,7 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     const detail = await request("GET", `/products/${productId}`);
     assert.equal(detail.status, 200);
     assert.ok(!detail.body.data.variants.some((variant: { _id: string }) => variant._id === variantId));
-    assert.equal((await request("PATCH", `${variantsPath()}/${variantId}`, { status: true }, token)).status, 200);
+    assert.equal((await request("PATCH", `${variantsPath()}/${variantId}`, { status: true, expected_version:(await ProductVariant.findById(variantId))?.get("__v")??0 }, token)).status, 200);
     assert.equal((await ProductVariant.findById(variantId))?.status, true);
   });
 
@@ -285,11 +306,15 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     const pending = await request("GET", "/admin/review-reports", undefined, token);
     assert.equal(pending.body.data.reports.length, 1);
     assert.equal(pending.body.data.reports[0].comment, reviewInput.comment);
-    assert.equal((await request("DELETE", `/admin/reviews/${reviewId}`, undefined, token)).status, 200);
-    assert.equal((await request("GET", reviewPath)).body.data.total, 0);
+    assert.equal((await request("DELETE", `/admin/reviews/${reviewId}`, undefined, token)).status, 404);
+    assert.equal((await request("PATCH", `/admin/reviews/${reviewId}/moderation`, { mask_all: true }, token)).status, 200);
+    const masked = await request("GET", reviewPath);
+    assert.equal(masked.body.data.total, 1);
+    assert.equal(masked.body.data.comments[0].rating, 5);
+    assert.match(masked.body.data.comments[0].comment, /^[*\s]+$/u);
     assert.equal((await request("GET", "/admin/review-reports", undefined, token)).body.data.reports.length, 0);
     const history = await request("GET", "/admin/review-reports?view=history", undefined, token);
-    assert.equal(history.body.data.reports[0].status, "removed");
+    assert.equal(history.body.data.reports[0].status, "masked");
   });
 
   await t.test("admin vẫn quản lý được sản phẩm đã tắt và danh sách có phân trang", async () => {
@@ -312,6 +337,7 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     const backendOrigin = new URL(base).origin;
     const environment = {
       MOMO_PARTNER_CODE: "LOCAL_TEST",
+      MOMO_ENABLED: "true",
       MOMO_ACCESS_KEY: randomUUID(),
       MOMO_SECRET_KEY: randomUUID(),
       MOMO_ENDPOINT: `${backendOrigin}/mock-momo`,
@@ -411,7 +437,7 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     assert.equal(qrData.amount, order.final_amount);
     assert.match(qrData.transfer_content, /^FS[0-9]{12}$/);
     const qr = new URL(qrData.qr_url);
-    assert.equal(qr.origin, "https://qr.sepay.vn");
+    assert.equal(qr.origin, "https://vietqr.app");
     assert.equal(qr.searchParams.get("des"), qrData.transfer_content);
     assert.equal(qr.searchParams.get("acc"), environment.SEPAY_ACCOUNT_NUMBER);
     assert.equal(qr.searchParams.get("amount"), String(order.final_amount));
@@ -420,10 +446,11 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     const webhookData = {
       id: 92704, transferType: "in", gateway: environment.SEPAY_BANK_CODE,
       accountNumber: environment.SEPAY_ACCOUNT_NUMBER, transferAmount: order.final_amount,
-      content: `THANH TOAN ${qrData.transfer_content}`, code: null,
+      content: `THANH TOAN ${qrData.transfer_content}`,
+      code: qrData.transfer_content.match(/FS[0-9]{12}/)?.[0],
       referenceCode: "FT-SEPAY-TEST",
     };
-    const notify = async (data: unknown, apiKey = environment.SEPAY_WEBHOOK_API_KEY) => {
+    const notify = async (data: unknown, apiKey: string = environment.SEPAY_WEBHOOK_API_KEY) => {
       const response = await fetch(base + "/payments/sepay/webhook", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Apikey ${apiKey}` },
@@ -438,8 +465,6 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
       { ...webhookData, transferAmount: order.final_amount - 1000 },
       { ...webhookData, accountNumber: "0000000000" },
       { ...webhookData, gateway: "ACB" },
-      { ...webhookData, content: webhookData.content + "9" },
-      { ...webhookData, content: webhookData.content + " FS123456789012" },
     ]) {
       assert.equal((await notify(invalid)).status, 200);
       assert.equal((await Order.findById(order._id))?.payment_status, "pending");
@@ -460,7 +485,10 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
       payment_method: "SePay",
     });
     const nextQR = (await checkout(nextOrder.id)).body.data;
-    const nextTransfer = { ...webhookData, transferAmount: nextOrder.final_amount, content: nextQR.transfer_content };
+    const nextTransfer = {
+      ...webhookData, transferAmount: nextOrder.final_amount, content: nextQR.transfer_content,
+      code: nextQR.transfer_content.match(/FS[0-9]{12}/)?.[0],
+    };
     // ID webhook và mã tham chiếu đều không được dùng cho một đơn thứ hai.
     await notify({ ...nextTransfer, referenceCode: "FT-OTHER-REFERENCE" });
     await notify({ ...nextTransfer, id: 92705 });
@@ -491,6 +519,7 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
       id: randomUUID(), transfer_type: "in", amount_in: nextOrder.final_amount, amount_out: 0,
       account_number: environment.SEPAY_ACCOUNT_NUMBER, bank_brand_name: environment.SEPAY_BANK_CODE,
       reference_number: "FT-SEPAY-SECOND", transaction_content: nextQR.transfer_content,
+      code: nextQR.transfer_content.match(/FS[0-9]{12}/)?.[0],
     };
     transactions = [
       null, { ...transaction, amount_in: 1 }, { ...transaction, account_number: "0000000000" },
@@ -525,9 +554,393 @@ test("Product Variants: HTTP + xác thực + MongoDB thật", async (t) => {
     process.env.SEPAY_WEBHOOK_API_KEY = environment.SEPAY_WEBHOOK_API_KEY;
     const vietinWebhook = await notify({
       ...webhookData, id: 92707, gateway: "VietinBank",
-      transferAmount: vietinOrder.final_amount, content: vietinQR.transfer_content, referenceCode: "FT-VIETINBANK-TEST",
+      transferAmount: vietinOrder.final_amount, content: vietinQR.transfer_content,
+      code: vietinQR.transfer_content.match(/FS[0-9]{12}/)?.[0], referenceCode: "FT-VIETINBANK-TEST",
     });
     assert.equal(vietinWebhook.status, 200);
     assert.equal((await Order.findById(vietinOrder._id))?.payment_status, "success");
   });
+
+  await t.test("khôi phục mật khẩu qua OTP và gửi liên hệ tài khoản cho admin", async (test) => {
+    const environment = {
+      SMTP_HOST: "smtp.example.invalid", SMTP_PORT: "465",
+      SMTP_USER: "sender@example.invalid", SMTP_PASSWORD: randomUUID(), SMTP_FROM: "F.Style <sender@example.invalid>",
+    };
+    const previous = Object.keys(environment).map((key) => [key, process.env[key]] as const);
+    test.after(() => {
+      for (const [key, value] of previous) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    Object.assign(process.env, environment);
+    const deliveries: Array<{ email: string; code: string }> = [];
+    test.mock.method(EmailService, "sendPasswordResetCode", async (email: string, code: string) => {
+      deliveries.push({ email, code });
+    });
+    const email = "customer@variant-test.invalid";
+    const send = (address = email) => request("POST", "/auth/forgot-password", { email: address });
+    const reset = (requestId: string, code: string, newPassword: string, address = email) =>
+      request("POST", "/auth/reset-password", { email: address, request_id: requestId, code, newPassword });
+    const allowResend = () => PasswordReset.updateMany({}, { $set: { requested_at: new Date(Date.now() - 61_000) } });
+    const latest = () => deliveries.at(-1)!;
+    const wrongCode = (code: string) => (code[0] === "0" ? "1" : "0") + code.slice(1);
+
+    process.env.SMTP_PASSWORD = "";
+    assert.equal((await send()).status, 503);
+    process.env.SMTP_PASSWORD = environment.SMTP_PASSWORD;
+    const first = await send("  CUSTOMER@variant-test.invalid ");
+    assert.equal(first.status, 202, first.body.message);
+    assert.match(first.body.data.request_id, /^[a-f0-9]{64}$/);
+    assert.equal(first.body.data.expires_in, 600);
+    assert.equal(first.body.data.resend_after, 60);
+    assert.equal("code" in first.body.data, false);
+    assert.equal(deliveries.length, 1);
+    assert.equal(latest().email, email);
+    assert.match(latest().code, /^[0-9]{6}$/);
+    const record = await PasswordReset.findOne({ request_id: first.body.data.request_id });
+    assert.match(record!.code_hash, /^[a-f0-9]{64}$/);
+    assert.notEqual(record!.code_hash, latest().code);
+    assert.equal((await send()).status, 429);
+
+    const testHash = await bcrypt.hash(password, 10);
+    await User.create([
+      { name: "Google Reset Fixture", email: "google@reset-test.invalid", auth_provider: "google", google_sub: randomUUID() },
+      { name: "Blocked Reset Fixture", email: "blocked@reset-test.invalid", password: testHash, is_blocked: true },
+    ]);
+    for (const address of ["missing@reset-test.invalid", "blocked@reset-test.invalid"]) {
+      const result = await send(address);
+      assert.equal(result.status, 202);
+      assert.equal(result.body.data.message, first.body.data.message);
+      assert.equal((await reset(result.body.data.request_id, "000000", randomUUID(), address)).status, 400);
+    }
+    assert.equal(deliveries.length, 1);
+    const firstCode = latest().code;
+    assert.equal((await reset(first.body.data.request_id, firstCode, "short")).status, 400);
+    assert.equal((await reset(first.body.data.request_id, wrongCode(firstCode), randomUUID())).status, 400);
+    assert.equal((await request("POST", "/auth/login", { email, password })).status, 200);
+
+    await PasswordReset.updateOne({ request_id: first.body.data.request_id }, { $set: { expires_at: new Date(Date.now() - 1000) } });
+    assert.equal((await reset(first.body.data.request_id, firstCode, randomUUID())).status, 400);
+    await allowResend();
+    const second = await send();
+    assert.equal(second.status, 202);
+    assert.notEqual(second.body.data.request_id, first.body.data.request_id);
+    assert.equal((await reset(first.body.data.request_id, firstCode, randomUUID())).status, 400);
+    for (let index = 0; index < 5; index++) {
+      assert.equal((await reset(second.body.data.request_id, wrongCode(latest().code), randomUUID())).status, 400);
+    }
+    assert.equal((await reset(second.body.data.request_id, latest().code, randomUUID())).status, 400);
+
+    await allowResend();
+    const third = await send();
+    assert.equal(third.status, 202);
+    const passwords = [randomUUID(), randomUUID()];
+    const outcomes = await Promise.all(passwords.map((value) => reset(third.body.data.request_id, latest().code, value)));
+    assert.deepEqual(outcomes.map((outcome) => outcome.status).sort(), [200, 400]);
+    const accepted = outcomes.findIndex((outcome) => outcome.status === 200);
+    assert.deepEqual(outcomes[accepted]!.body.data, { updated: true });
+    const newPassword = passwords[accepted]!;
+    assert.equal((await request("GET", "/auth/me", undefined, customerToken)).status, 401);
+    assert.equal((await request("POST", "/auth/login", { email, password })).status, 401);
+    const login = await request("POST", "/auth/login", { email, password: newPassword });
+    assert.equal(login.status, 200);
+    assert.equal((await request("GET", "/auth/me", undefined, login.body.data.token)).status, 200);
+    assert.equal((await reset(third.body.data.request_id, latest().code, randomUUID())).status, 400);
+
+    // Đổi mật khẩu trong tài khoản cũng vô hiệu hóa mã khôi phục đã gửi trước đó.
+    await allowResend();
+    const stale = await send();
+    assert.equal(stale.status, 202);
+    const staleCode = latest().code;
+    assert.equal((await request("PATCH", "/auth/password", { currentPassword: newPassword, newPassword: randomUUID() }, login.body.data.token)).status, 200);
+    assert.equal((await reset(stale.body.data.request_id, staleCode, randomUUID())).status, 400);
+
+    // Tài khoản cũ thiếu auth_provider và session_version vẫn khôi phục được.
+    const legacyEmail = "legacy@reset-test.invalid";
+    await User.collection.insertOne({ name: "Legacy Reset Fixture", email: legacyEmail, password: testHash });
+    const legacy = await send(legacyEmail);
+    assert.equal(legacy.status, 202);
+    const legacyPassword = randomUUID();
+    assert.equal((await reset(legacy.body.data.request_id, latest().code, legacyPassword, legacyEmail)).status, 200);
+    assert.equal((await request("POST", "/auth/login", { email: legacyEmail, password: legacyPassword })).status, 200);
+
+    // Giới hạn gửi theo email vẫn có hiệu lực sau nhiều lần gửi lại.
+    await PasswordResetLimit.deleteMany({});
+    const limitedEmail = "rate-limit@reset-test.invalid";
+    for (let index = 0; index < 5; index++) {
+      await allowResend();
+      assert.equal((await send(limitedEmail)).status, 202);
+    }
+    await allowResend();
+    assert.equal((await send(limitedEmail)).status, 429);
+    await PasswordResetLimit.deleteMany({});
+    for (let index = 0; index < 30; index++) {
+      assert.equal((await send(`ip-limit-${index}@reset-test.invalid`)).status, 202);
+    }
+    assert.equal((await send("ip-limit-31@reset-test.invalid")).status, 429);
+
+    const ticket = await request("POST", "/contact", {
+      name: "Khách hàng kiểm thử", email: "reachable@reset-test.invalid", topic: "tai-khoan",
+      message: "Cần hỗ trợ tài khoản đã đăng ký bằng email cũ.",
+    });
+    assert.equal(ticket.status, 201);
+    const inbox = await request("GET", "/admin/contacts", undefined, token);
+    assert.equal(inbox.status, 200);
+    assert.ok(inbox.body.data.requests.some((item: { _id: string; topic: string }) => item._id === ticket.body.data.id && item.topic === "tai-khoan"));
+  });
+
+  await t.test("Google tiếp tục đăng nhập sau OTP và khôi phục liên kết tài khoản Gmail cũ", async (test) => {
+    const environment = {
+      GOOGLE_CLIENT_ID: "google-recovery-fixture.apps.googleusercontent.com",
+      SMTP_HOST: "smtp.example.invalid", SMTP_PORT: "465", SMTP_USER: "sender@example.invalid",
+      SMTP_PASSWORD: randomUUID(), SMTP_FROM: "VSC_BAPD <sender@example.invalid>",
+    };
+    const previous = Object.keys(environment).map((key) => [key, process.env[key]] as const);
+    test.after(() => {
+      for (const [key, value] of previous) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    Object.assign(process.env, environment);
+    await PasswordResetLimit.deleteMany({});
+    const deliveries: Array<{ email: string; code: string }> = [];
+    test.mock.method(EmailService, "sendPasswordResetCode", async (email: string, code: string) => {
+      deliveries.push({ email, code });
+    });
+    let profile: { sub: string; email: string; email_verified: boolean; name: string; hd?: string } = {
+      sub: randomUUID(), email: "google-recovery@gmail.com", email_verified: true, name: "Google Recovery Fixture",
+    };
+    test.mock.method(OAuth2Client.prototype, "verifyIdToken", async (options: { idToken: string; audience: string }) => {
+      assert.equal(options.audience, environment.GOOGLE_CLIENT_ID);
+      if (options.idToken !== "verified-google-fixture") throw new Error("Invalid Google token");
+      return { getPayload: () => ({ ...profile }) };
+    });
+    const googleLogin = (credential = "verified-google-fixture") => request("POST", "/auth/google", { credential });
+    const setPasswordViaOTP = async (email: string, newPassword: string) => {
+      const issued = await request("POST", "/auth/forgot-password", { email });
+      assert.equal(issued.status, 202, issued.body.message);
+      const delivery = deliveries.at(-1);
+      assert.equal(delivery?.email, email);
+      const changed = await request("POST", "/auth/reset-password", {
+        email, request_id: issued.body.data.request_id, code: delivery?.code, newPassword,
+      });
+      assert.equal(changed.status, 200, changed.body.message);
+    };
+
+    const first = await googleLogin();
+    assert.equal(first.status, 200, first.body.message);
+    const original = await User.findOne({ email: profile.email }).select("+google_sub +password");
+    assert.ok(original);
+    assert.equal(original.google_sub, profile.sub);
+    assert.equal(original.password, undefined);
+    const newPassword = randomUUID();
+    await setPasswordViaOTP(profile.email, newPassword);
+    assert.equal((await request("GET", "/auth/me", undefined, first.body.data.token)).status, 401);
+    const recovered = await googleLogin();
+    assert.equal(recovered.status, 200, recovered.body.message);
+    const me = await request("GET", "/auth/me", undefined, recovered.body.data.token);
+    assert.equal(me.body.data._id, original.id);
+    const retained = await User.findById(original._id).select("+google_sub +password");
+    assert.equal(retained?.google_sub, profile.sub);
+    assert.equal(retained?.auth_provider, "google");
+    assert.equal(await User.countDocuments({ email: profile.email }), 1);
+    assert.equal((await request("POST", "/auth/login", { email: profile.email, password: newPassword })).status, 200);
+
+    // Dữ liệu cũ có mật khẩu nhưng chưa gắn google_sub như trường hợp bị báo lỗi.
+    profile = { sub: randomUUID(), email: "legacy-google-recovery@gmail.com", email_verified: true, name: "Google Profile Name" };
+    const local = await request("POST", "/auth/register", { email: profile.email, name: "Tên khách hàng đã lưu", password });
+    assert.equal(local.status, 201);
+    const localId = local.body.data._id;
+    await User.updateOne({ _id: localId }, { $set: { role: "staff" } });
+    const localPassword = randomUUID();
+    await setPasswordViaOTP(profile.email, localPassword);
+    const linked = await Promise.all([googleLogin(), googleLogin()]);
+    assert.ok(linked.every((result) => result.status === 200), JSON.stringify(linked.map((result) => ({ status: result.status, message: result.body.message }))));
+    assert.ok(linked.every((result) => result.body.data.role === "staff"));
+    const localAfter = await User.findById(localId).select("+google_sub +password");
+    assert.equal(localAfter?.google_sub, profile.sub);
+    assert.equal(localAfter?.name, "Tên khách hàng đã lưu");
+    assert.equal(await User.countDocuments({ email: profile.email }), 1);
+    assert.equal((await request("POST", "/auth/login", { email: profile.email, password: localPassword })).status, 200);
+    // auth_provider của dữ liệu cũ có thể là local dù đã có liên kết Google.
+    assert.equal((await googleLogin()).status, 200);
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const boundSub = randomUUID();
+    await User.create({
+      email: "already-linked@gmail.com", name: "Existing Google Owner", google_sub: boundSub,
+      auth_provider: "google", password: passwordHash,
+    });
+    profile = { sub: randomUUID(), email: "already-linked@gmail.com", email_verified: true, name: "Another Google Account" };
+    assert.equal((await googleLogin()).status, 409);
+    assert.equal((await User.findOne({ email: profile.email }).select("+google_sub"))?.google_sub, boundSub);
+
+    await User.create({ email: "external-owner@example.invalid", name: "External Owner", password: passwordHash });
+    profile = { sub: randomUUID(), email: "external-owner@example.invalid", email_verified: true, name: "External Google Account" };
+    assert.equal((await googleLogin()).status, 409);
+    assert.equal((await User.findOne({ email: profile.email }).select("+google_sub"))?.google_sub, undefined);
+    // Workspace có hd do Google xác minh cũng có thể liên kết với tài khoản cùng email.
+    profile = { ...profile, hd: "example.invalid" };
+    assert.equal((await googleLogin()).status, 200);
+    const verifiedSub = profile.sub;
+    profile.email = "already-linked@gmail.com";
+    assert.equal((await googleLogin()).status, 200);
+    const stable = await User.findOne({ google_sub: verifiedSub });
+    assert.equal(stable?.email, "external-owner@example.invalid");
+
+    assert.equal((await googleLogin("invalid-google-fixture")).status, 401);
+    profile = { sub: randomUUID(), email: "unverified-google@gmail.com", email_verified: false, name: "Unverified" };
+    assert.equal((await googleLogin()).status, 401);
+    assert.equal(await User.countDocuments({ email: profile.email }), 0);
+    profile = { sub: randomUUID(), email: "blocked-google@gmail.com", email_verified: true, name: "Blocked" };
+    await User.create({ email: profile.email, name: profile.name, google_sub: profile.sub, auth_provider: "google", is_blocked: true });
+    assert.equal((await googleLogin()).status, 403);
+  });
+
+  await t.test("Ma trận màu × size lưu nguyên khối và ảnh theo màu; không ghi đè SKU đã có", async () => {
+    const buyer = await request("POST", "/auth/register", { name: "Admin flow buyer", email: "adminflow-customer@variant-test.invalid", password });
+    assert.equal(buyer.status, 201); customerToken = buyer.body.data.token;
+    const parent = await Product.findById(productId).lean();
+    assert.ok(parent);
+    const p = await Product.create({ name: "Matrix integration", slug: "matrix-integration", category_id: parent.category_id, brand_id: parent.brand_id });
+    const path = "/products/" + p.id + "/variants/batch";
+    const rows = ["Đen", "Trắng"].flatMap((color, c) => ["S", "M"].map((size) => ({ sku: "MATRIX-" + c + "-" + size, size, color, price: 200000, sale_price: null, stock_quantity: 5 })));
+    assert.equal((await request("POST", path, { variants: rows }, customerToken)).status, 403);
+    const invalid = await request("POST", path, { variants: [rows[0], { ...rows[1], sale_price: 300000 }] }, token);
+    assert.equal(invalid.status, 400);
+    assert.equal(await ProductVariant.countDocuments({ product_id: p._id }), 0);
+    const saved = await request("POST", path, { variants: rows, color_images: [{ color: "Đen", image_url: "/uploads/black-fixture.png" }, { color: "Trắng", image_url: "/uploads/white-fixture.png" }] }, token);
+    assert.equal(saved.status, 201, saved.body.message);
+    assert.equal(saved.body.data.length, 4);
+    assert.equal(await ProductImage.countDocuments({ product_id: p._id }), 2);
+    assert.equal(await ProductImage.countDocuments({ product_id: p._id, is_primary: true }), 1);
+    assert.equal((await request("POST", path, { variants: rows }, token)).status, 409);
+    assert.equal(await ProductVariant.countDocuments({ product_id: p._id }), 4);
+    const collision = [{ ...rows[0], sku: "NEW-ROLLBACK-SKU", size: "XL" }, { ...rows[1], size: "XXL" }];
+    assert.equal((await request("POST", path, { variants: collision }, token)).status, 409);
+    assert.equal(await ProductVariant.countDocuments({ product_id: p._id, sku: "NEW-ROLLBACK-SKU" }), 0);
+    const listed = await request("GET", "/products/admin?search=Matrix", undefined, token);
+    assert.equal(listed.body.data[0]._id, p.id);
+    assert.equal(listed.body.data[0].variant_count, 4);
+    assert.equal(listed.body.data[0].image, "/uploads/black-fixture.png");
+  });
+
+  await t.test("Giao thất bại, giao lại, kiểm hàng hoàn, hàng cách ly và lịch sử khách không cộng kho trùng", async () => {
+    const customer = await User.findOne({ email: "adminflow-customer@variant-test.invalid" }); assert.ok(customer);
+    const v = await ProductVariant.create({ product_id: productId, sku: "RETURN-INSPECTION", size: "XXXL", color: "Nâu", price: 100000, stock_quantity: 2 });
+    const order = await Order.create({ user_id: customer._id, total_product_amount: 300000, final_amount: 335000, shipping_fee: 35000, receiver_name: "Return fixture", receiver_phone: "0900000000", shipping_address: "Fixture", payment_method: "COD", payment_status: "pending", order_status: "shipping" });
+    const item = await OrderDetail.create({ order_id: order._id, product_id: productId, product_variant_id: v._id, product_name: "Return fixture", sku: v.sku, size: v.size, color: v.color, quantity: 3, price_at_buy: 100000 });
+    const path = "/admin/orders/" + order.id;
+    assert.equal((await request("PATCH", path + "/delivery", { action: "fail", reason: "unreachable", note: "Không liên hệ được lần 1" }, customerToken)).status, 403);
+    assert.equal((await request("PATCH", path + "/delivery", { action: "fail", reason: "unreachable", note: "Không liên hệ được lần 1" }, token)).status, 200);
+    assert.equal((await ProductVariant.findById(v._id))?.stock_quantity, 2);
+    assert.equal((await request("PATCH", path + "/delivery", { action: "retry", note: "Khách đồng ý nhận ngày hôm sau" }, token)).status, 200);
+    assert.equal((await request("PATCH", path + "/delivery", { action: "fail", reason: "refused", note: "Khách xác nhận từ chối nhận, chuyển hoàn" }, token)).status, 200);
+    assert.equal((await request("PATCH", path + "/cancel", { note: "Không được hủy tắt" }, token)).status, 409);
+    assert.equal((await request("PATCH", path + "/delivery", { action: "return", note: "Đã thống nhất vận chuyển hoàn về shop" }, token)).status, 200);
+    const line = { order_detail_id: item.id, restock_quantity: 1, damaged_quantity: 1, missing_quantity: 1 };
+    assert.equal((await request("POST", path + "/return-receipt", { note: "Kiểm hàng", lines: [{ ...line, restock_quantity: 0 }] }, token)).status, 400);
+    assert.equal((await ProductVariant.findById(v._id))?.stock_quantity, 2);
+    const concurrent = await Promise.all([1, 2].map(() => request("POST", path + "/return-receipt", { note: "Một nguyên vẹn, một rách, một thiếu; giữ biên bản vận chuyển", lines: [line] }, token)));
+    assert.deepEqual(concurrent.map((r) => r.status).sort(), [200, 409]);
+    const after = await ProductVariant.findById(v._id); assert.ok(after);
+    assert.equal(after.stock_quantity, 3); assert.equal(after.quarantine_quantity, 1);
+    const closed = await Order.findById(order._id); assert.equal(closed?.order_status, "returned"); assert.equal(closed?.payment_status, "failed");
+    assert.equal(await OrderReturn.countDocuments({ order_id: order._id }), 1);
+    const operations = await request("GET", path + "/operations", undefined, token);
+    assert.equal(operations.body.data.history.length, 5);
+    assert.equal(operations.body.data.receipt.claim_status, "pending");
+    assert.equal((await request("PATCH", path + "/return-claim", { note: "Đơn vị vận chuyển nhận xử lý bồi thường theo biên bản" }, token)).status, 200);
+    const customers = await request("GET", "/admin/customers?search=adminflow-customer@variant-test.invalid", undefined, token);
+    assert.equal(customers.status, 200);
+    assert.equal(customers.body.data[0].refusalCount, 1);
+    assert.equal(customers.body.data[0].returnedCount, 1);
+    const history = await request("GET", "/admin/customers/" + customer.id + "/orders", undefined, token);
+    const target = history.body.data.find((row: { _id: string }) => row._id === order.id);
+    assert.equal(target.items[0].sku, v.sku); assert.equal(target.delivery_incidents.length, 2);
+    const move = { action: "release", quantity: 1, expected_version: after.get("__v"), note: "Đã sửa và kiểm đạt chất lượng để bán" };
+    assert.equal((await request("POST", "/admin/inventory/" + v.id + "/quarantine", { ...move, quantity: 2 }, token)).status, 409);
+    assert.equal((await request("POST", "/admin/inventory/" + v.id + "/quarantine", move, token)).status, 200);
+    assert.equal((await request("POST", "/admin/inventory/" + v.id + "/quarantine", move, token)).status, 409);
+    const available = await ProductVariant.findById(v._id); assert.ok(available);
+    assert.equal(available.stock_quantity, 4); assert.equal(available.quarantine_quantity, 0);
+    const adjust = { mode: "add", quantity: 6, expected_version: available.get("__v"), note: "Nhập thêm từ nhà cung cấp, phiếu NK01" };
+    assert.equal((await request("POST", "/admin/inventory/" + v.id + "/adjustment", adjust, token)).status, 200);
+    assert.equal((await request("POST", "/admin/inventory/" + v.id + "/adjustment", adjust, token)).status, 409);
+    assert.equal((await ProductVariant.findById(v._id))?.stock_quantity, 10);
+    assert.equal(await InventoryMovement.countDocuments({ variant_id: v._id }), 3);
+    const paid = await Order.create({ user_id: customer._id, total_product_amount: 100000, final_amount: 100000, receiver_name: "Paid return", receiver_phone: "0900000000", shipping_address: "Fixture", payment_method: "MoMo", payment_status: "success", order_status: "returned" });
+    const refund = { amount: 100000, reference: "REFUND-FIXTURE-001", note: "Hoàn ngân hàng đã thực hiện", confirmed: true };
+    assert.equal((await request("POST", "/admin/orders/" + paid.id + "/refund", { ...refund, amount: 90000 }, token)).status, 400);
+    assert.equal((await request("POST", "/admin/orders/" + paid.id + "/refund", { ...refund, confirmed: false }, token)).status, 400);
+    assert.equal((await request("POST", "/admin/orders/" + paid.id + "/refund", refund, token)).status, 200);
+    assert.equal((await request("POST", "/admin/orders/" + paid.id + "/refund", refund, token)).status, 409);
+    assert.equal((await Order.findById(paid._id))?.payment_status, "refunded");
+  });
+
+  await t.test("Doanh số, nhập hàng và hàng bán chậm loại đơn chờ/hủy/hoàn; tài khoản quản trị được bảo vệ", async () => {
+    const customer = await User.findOne({ email: "adminflow-customer@variant-test.invalid" }); assert.ok(customer);
+    const parent = await Product.findById(productId); assert.ok(parent);
+    const old = new Date(Date.now() - 60 * 86400000);
+    const makeProduct = async (name: string, slug: string, stock: number) => {
+      const product = await Product.create({ name, slug, category_id: parent.category_id, brand_id: parent.brand_id, created_at: old });
+      const variant = await ProductVariant.create({ product_id: product._id, sku: slug.toUpperCase(), size: "M", color: "Đen", price: 100000, stock_quantity: stock });
+      return { product, variant };
+    };
+    const fast = await makeProduct("Cùng tên để kiểm tra mã", "analytics-fast", 2);
+    const slow = await makeProduct("Cùng tên để kiểm tra mã", "analytics-slow", 80);
+    for (const [status, payment, quantity] of [["completed", "success", 30], ["pending", "success", 500], ["cancelled", "success", 800], ["returned", "refunded", 900]] as const) {
+      const order = await Order.create({ user_id: customer._id, total_product_amount: quantity * 100000, final_amount: quantity * 100000, receiver_name: "Analytics", receiver_phone: "0900000000", shipping_address: "Fixture", payment_method: "COD", order_status: status, payment_status: payment, completed_at: new Date() });
+      await OrderDetail.create({ order_id: order._id, product_id: fast.product._id, product_variant_id: fast.variant._id, product_name: fast.product.name, sku: fast.variant.sku, size: "M", color: "Đen", quantity, price_at_buy: 100000 });
+    }
+    const response = await request("GET", "/admin/dashboard", undefined, token);
+    assert.equal(response.status, 200, response.body.message);
+    const data = response.body.data;
+    const top = data.topProducts.find((row: { _id: string }) => row._id === fast.product.id);
+    assert.equal(top.quantity, 30);
+    assert.equal(data.topProducts.some((row: { _id: string }) => row._id === slow.product.id), false);
+    const advice = data.restockRecommendations.find((row: { sku: string }) => row.sku === fast.variant.sku);
+    assert.equal(advice.suggestedQuantity, 28);
+    assert.equal(advice.coverDays, 2);
+    assert.ok(data.slowProducts.some((row: { _id: string }) => row._id === slow.product.id));
+    const expected = await Order.aggregate([{ $match: { order_status: "completed", payment_status: "success" } }, { $group: { _id: null, total: { $sum: "$final_amount" } } }]);
+    assert.equal(data.metrics.totalRevenue, expected[0].total);
+    const admin = await User.findOne({ role: "admin" }); assert.ok(admin);
+    assert.equal((await request("PATCH", "/admin/customers/" + admin.id + "/role", { role: "customer" }, token)).status, 403);
+    assert.equal((await request("PATCH", "/admin/customers/" + admin.id + "/block", { is_blocked: true }, token)).status, 403);
+    assert.equal((await User.findById(admin._id))?.role, "admin");
+    assert.equal((await User.findById(admin._id))?.is_blocked, false);
+    const otherAdmin = await User.create({ name: "Protected admin", email: "otheradmin@business.invalid", role: "admin" });
+    assert.equal((await request("PATCH", "/admin/customers/" + otherAdmin.id + "/role", { role: "staff" }, token)).status, 403);
+    assert.equal((await request("PATCH", "/admin/customers/" + otherAdmin.id + "/block", { is_blocked: true }, token)).status, 403);
+    const staff = await User.create({ name: "Operations staff", email: "opsstaff@business.invalid", role: "staff", password: await bcrypt.hash(password, 10) });
+    const login = await request("POST", "/auth/login", { email: staff.email, password });
+    assert.equal(login.status, 200);
+    const staffToken = login.body.data.token;
+    assert.equal((await request("PATCH", "/admin/customers/" + customer.id + "/role", { role: "staff" }, staffToken)).status, 403);
+    assert.equal((await request("PATCH", "/admin/customers/" + customer.id + "/block", { is_blocked: true }, staffToken)).status, 403);
+    assert.equal((await request("POST", "/admin/orders/" + new mongoose.Types.ObjectId() + "/refund", { amount: 1, reference: "fixture", note: "fixture", confirmed: true }, staffToken)).status, 403);
+    const staffView = await request("GET", "/admin/customers?role=admin", undefined, staffToken);
+    assert.ok(staffView.body.data.every((user: { role: string; canManage: boolean }) => user.role === "customer" && !user.canManage));
+    const listed = await request("GET", "/admin/customers?role=admin", undefined, token);
+    assert.equal(listed.body.data[0].canManage, false);
+    assert.equal(listed.body.data[0].password, undefined); assert.equal(listed.body.data[0].google_sub, undefined);
+  });
+
+  await t.test("Từ cấm được che trong đánh giá cũ/mới, giữ nguyên số sao và nội dung gốc cho quản trị", async () => {
+    const comment = await ProductComment.create({ product_key: productId, user_email: "mask@fixture.invalid", user_name: "Mask fixture", rating: 2, comment: "Giao chậm, cụm cấm kiểm thử, nhưng vải mềm." });
+    assert.equal((await request("POST", "/admin/blocked-words", { word: "cụm cấm kiểm thử" }, customerToken)).status, 403);
+    const word = await request("POST", "/admin/blocked-words", { word: "cụm cấm kiểm thử" }, token);
+    assert.equal(word.status, 200);
+    const response = await request("GET", "/reviews/" + productId);
+    const publicReview = response.body.data.comments.find((row: { _id: string }) => row._id === comment.id);
+    assert.equal(publicReview.rating, 2); assert.ok(publicReview.comment.includes("Giao chậm")); assert.ok(!publicReview.comment.includes("cụm cấm")); assert.ok(publicReview.comment.includes("*"));
+    assert.equal((await ProductComment.findById(comment._id))?.comment, "Giao chậm, cụm cấm kiểm thử, nhưng vải mềm.");
+    assert.equal((await request("PATCH", "/admin/blocked-words/" + word.body.data._id, { is_active: false }, token)).status, 200);
+    const restored = await request("GET", "/reviews/" + productId);
+    assert.ok(restored.body.data.comments.find((row: { _id: string }) => row._id === comment.id).comment.includes("cụm cấm"));
+  });
+
 });

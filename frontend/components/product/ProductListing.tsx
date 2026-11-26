@@ -2,8 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { changeCatalogFilters as changeFilters } from "@/lib/catalog-query";
+import { useSearchParams } from "next/navigation";
 import ProductCard from "@/components/product/ProductCard";
+import CatalogFilterDrawer from "@/components/product/CatalogFilterDrawer";
 import { API_BASE_URL, readApiResponse, type ApiBrand } from "@/lib/api";
+import { STORE_NAME } from "@/lib/store-brand";
 import { useCatalogCategories } from "@/lib/useCatalogCategories";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 
@@ -27,29 +31,24 @@ const priceRanges = [
   { id: "above-1000", label: "Trên 1.000.000đ", min: 1_000_000, max: Infinity },
 ];
 
-export default function ProductListing({
-  initialCategory = "",
-  initialQuery = "",
-  initialSort = "featured",
-  initialStatus = "all",
-  searchMode = false,
-}: {
-  initialCategory?: string;
-  initialQuery?: string;
-  initialSort?: string;
-  initialStatus?: string;
-  searchMode?: boolean;
-}) {
-  const [category, setCategory] = useState(initialCategory);
-  const [query, setQuery] = useState(initialQuery);
-  const [sort, setSort] = useState(initialSort);
-  const [maxPrice, setMaxPrice] = useState<number>();
-  const [priceRangeId, setPriceRangeId] = useState("all");
-  const [selectedSize, setSelectedSize] = useState("");
-  const [selectedColor, setSelectedColor] = useState("");
-  const [selectedBrand, setSelectedBrand] = useState("");
-  const [statusFilter, setStatusFilter] = useState(initialStatus);
-  const [currentPage, setCurrentPage] = useState(1);
+export default function ProductListing({ searchMode = false }: { searchMode?: boolean }) {
+  const params = useSearchParams();
+  const category = params.get("category") ?? "";
+  const query = params.get("q") ?? "";
+  const sortParam = params.get("sort") ?? "";
+  const sort = ["newest", "price-asc", "price-desc"].includes(sortParam) ? sortParam : "featured";
+  const maxPriceParam = params.get("maxPrice");
+  const maxPrice = maxPriceParam && /^\d+$/.test(maxPriceParam) && Number.isSafeInteger(Number(maxPriceParam))
+    ? Number(maxPriceParam) : undefined;
+  const priceRangeId = priceRanges.find(({ id }) => id === params.get("price"))?.id ?? "all";
+  const selectedSize = params.get("size") ?? "";
+  const selectedColor = params.get("color") ?? "";
+  const selectedBrand = params.get("brand") ?? "";
+  const statusParam = params.get("status") ?? "";
+  const statusFilter = ["sale", "instock", "outofstock", "featured"].includes(statusParam)
+    ? statusParam : params.get("featured") === "true" ? "featured" : "all";
+  const pageParam = Number(params.get("page"));
+  const currentPage = Number.isSafeInteger(pageParam) && pageParam > 0 ? pageParam : 1;
 
   const { products: catalogProducts, error: catalogError, loading } = useCatalogProducts();
   const { categories: catalogCategories = [], error: categoryLoadError } = useCatalogCategories();
@@ -96,7 +95,7 @@ export default function ProductListing({
   const availableBrands = useMemo(() => {
     const fromApi = catalogBrands.map((brand) => brand.name);
     const fromProducts = catalogProducts.map((product) => product.brand ?? "").filter(Boolean);
-    return [...new Set(["F.Style", ...fromApi, ...fromProducts].filter(Boolean))];
+    return [...new Set([STORE_NAME, ...fromApi, ...fromProducts].filter(Boolean))];
   }, [catalogBrands, catalogProducts]);
 
   const visibleProducts = useMemo(() => {
@@ -126,7 +125,7 @@ export default function ProductListing({
 
       const matchesBrand =
         !selectedBrand ||
-        (product.brand ?? "F.Style").toLocaleLowerCase("vi") === selectedBrand.toLocaleLowerCase("vi");
+        (product.brand ?? STORE_NAME).toLocaleLowerCase("vi") === selectedBrand.toLocaleLowerCase("vi");
 
       const isOutOfStock = product.variants?.length === 0 || product.inStock === false;
       const isOnSale =
@@ -180,16 +179,11 @@ export default function ProductListing({
   const paginatedProducts = visibleProducts.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   function resetAllFilters() {
-    setQuery("");
-    setCategory("");
-    setMaxPrice(undefined);
-    setPriceRangeId("all");
-    setSelectedSize("");
-    setSelectedColor("");
-    setSelectedBrand("");
-    setStatusFilter("all");
-    setSort("featured");
-    setCurrentPage(1);
+    changeFilters({ q: "", category: "", maxPrice: "", price: "", size: "", color: "", brand: "", status: "", sort: "" });
+  }
+
+  function changePage(page: number) {
+    changeFilters({ page: page > 1 ? String(page) : "" });
   }
 
   const hasActiveFilters =
@@ -200,7 +194,8 @@ export default function ProductListing({
     Boolean(selectedSize) ||
     Boolean(selectedColor) ||
     Boolean(selectedBrand) ||
-    statusFilter !== "all";
+    statusFilter !== "all" ||
+    sort !== "featured";
 
   return (
     <section className="catalog-page">
@@ -225,7 +220,7 @@ export default function ProductListing({
             id="catalog-query"
             name="q"
             value={query}
-            onChange={(event) => { setQuery(event.target.value); setCurrentPage(1); }}
+            onChange={(event) => changeFilters({ q: event.target.value }, true)}
             placeholder="Bạn đang tìm áo thun, sơ mi, váy...?"
           />
           <button type="submit" aria-label="Tìm kiếm">
@@ -243,15 +238,8 @@ export default function ProductListing({
               key={chip.label}
               type="button"
               className={`type-chip${active ? " active" : ""}`}
-              onClick={() => {
-                if (!chip.value) {
-                  setQuery("");
-                  setCategory("");
-                } else {
-                  setQuery(chip.value);
-                }
-                setCurrentPage(1);
-              }}
+              aria-pressed={active}
+              onClick={() => changeFilters(chip.value ? { q: chip.value } : { q: "", category: "" })}
             >
               {chip.label}
             </button>
@@ -265,24 +253,18 @@ export default function ProductListing({
         </p>
         <label className="store-catalog-sort">
           Sắp xếp
-          <select value={sort} onChange={(event) => { setSort(event.target.value); setCurrentPage(1); }}>
+          <select value={sort} onChange={(event) => changeFilters({ sort: event.target.value === "featured" ? "" : event.target.value })}>
             <option value="featured">Nổi bật</option>
             <option value="newest">Mới nhất</option>
             <option value="price-asc">Giá thấp đến cao</option>
             <option value="price-desc">Giá cao đến thấp</option>
           </select>
         </label>
-        <details className="store-catalog-filters">
-          <summary>
-            <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
-              <path d="M3 6h11m4 0h3M3 12h4m4 0h10M3 18h11m4 0h3" /><circle cx="16" cy="6" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="16" cy="18" r="2" />
-            </svg>
-            Bộ lọc
-          </summary>
+        <CatalogFilterDrawer active={hasActiveFilters} count={loading ? undefined : visibleProducts.length} onReset={resetAllFilters}>
           <div className="catalog-toolbar catalog-toolbar-expanded">
             <label>
               Danh mục
-              <select value={category} onChange={(event) => { setCategory(event.target.value); setCurrentPage(1); }}>
+              <select value={category} onChange={(event) => changeFilters({ category: event.target.value })}>
                 <option value="">Tất cả sản phẩm</option>
                 {catalogCategories.map((item) => (
                   <option key={item.slug} value={item.name}>
@@ -294,7 +276,7 @@ export default function ProductListing({
 
             <label>
               Khoảng giá
-              <select value={priceRangeId} onChange={(event) => { setPriceRangeId(event.target.value); setCurrentPage(1); }}>
+              <select value={priceRangeId} onChange={(event) => changeFilters({ price: event.target.value === "all" ? "" : event.target.value })}>
                 {priceRanges.map((range) => (
                   <option key={range.id} value={range.id}>
                     {range.label}
@@ -305,7 +287,7 @@ export default function ProductListing({
 
             <label>
               Kích cỡ (Size)
-              <select value={selectedSize} onChange={(event) => { setSelectedSize(event.target.value); setCurrentPage(1); }}>
+              <select value={selectedSize} onChange={(event) => changeFilters({ size: event.target.value })}>
                 <option value="">Tất cả kích cỡ</option>
                 {availableSizes.map((size) => (
                   <option key={size} value={size}>
@@ -317,7 +299,7 @@ export default function ProductListing({
 
             <label>
               Màu sắc
-              <select value={selectedColor} onChange={(event) => { setSelectedColor(event.target.value); setCurrentPage(1); }}>
+              <select value={selectedColor} onChange={(event) => changeFilters({ color: event.target.value })}>
                 <option value="">Tất cả màu sắc</option>
                 {availableColors.map((color) => (
                   <option key={color} value={color}>
@@ -329,7 +311,7 @@ export default function ProductListing({
 
             <label>
               Thương hiệu
-              <select value={selectedBrand} onChange={(event) => { setSelectedBrand(event.target.value); setCurrentPage(1); }}>
+              <select value={selectedBrand} onChange={(event) => changeFilters({ brand: event.target.value })}>
                 <option value="">Tất cả thương hiệu</option>
                 {availableBrands.map((brand) => (
                   <option key={brand} value={brand}>
@@ -341,7 +323,7 @@ export default function ProductListing({
 
             <label>
               Trạng thái
-              <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setCurrentPage(1); }}>
+              <select value={statusFilter} onChange={(event) => changeFilters({ status: event.target.value === "all" ? "" : event.target.value })}>
                 <option value="all">Tất cả trạng thái</option>
                 <option value="featured">Nổi bật</option>
                 <option value="instock">Còn hàng</option>
@@ -358,11 +340,11 @@ export default function ProductListing({
                 max={priceLimit}
                 step="50000"
                 value={maxPrice ?? priceLimit}
-                onChange={(event) => { setMaxPrice(Number(event.target.value)); setCurrentPage(1); }}
+                onChange={(event) => changeFilters({ maxPrice: event.target.value }, true)}
               />
             </label>
           </div>
-        </details>
+        </CatalogFilterDrawer>
       </div>
 
       {hasActiveFilters && (
@@ -394,7 +376,7 @@ export default function ProductListing({
                 type="button"
                 className="pagination-btn"
                 disabled={safePage <= 1}
-                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                onClick={() => changePage(Math.max(1, safePage - 1))}
               >
                 ← Trang trước
               </button>
@@ -405,7 +387,7 @@ export default function ProductListing({
                     type="button"
                     className={`pagination-page${pageNumber === safePage ? " active" : ""}`}
                     aria-current={pageNumber === safePage ? "page" : undefined}
-                    onClick={() => setCurrentPage(pageNumber)}
+                    onClick={() => changePage(pageNumber)}
                   >
                     {pageNumber}
                   </button>
@@ -415,7 +397,7 @@ export default function ProductListing({
                 type="button"
                 className="pagination-btn"
                 disabled={safePage >= totalPages}
-                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                onClick={() => changePage(Math.min(totalPages, safePage + 1))}
               >
                 Trang sau →
               </button>

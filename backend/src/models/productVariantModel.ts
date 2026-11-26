@@ -8,6 +8,7 @@ export interface IProductVariant extends Document {
   price: number;
   sale_price?: number | null;
   stock_quantity: number;
+  quarantine_quantity: number;
   status: boolean;
 }
 
@@ -43,7 +44,7 @@ const productVariantSchema = new Schema<IProductVariant>(
       type: Number,
       required: [true, "Vui lòng nhập Giá bán gốc"],
       min: [0, "Giá tiền không được nhỏ hơn 0"],
-      validate: { validator: Number.isFinite, message: "Giá tiền phải là số hữu hạn" },
+      validate: { validator: Number.isSafeInteger, message: "Giá tiền phải là số nguyên VNĐ an toàn" },
     },
 
     sale_price: {
@@ -52,7 +53,7 @@ const productVariantSchema = new Schema<IProductVariant>(
       min: [0, "Giá khuyến mãi không được nhỏ hơn 0"],
       validate: {
         validator: function (value: number | null | undefined) {
-          return value == null || (Number.isFinite(value) && value <= this.get("price"));
+          return value == null || (Number.isSafeInteger(value) && value <= this.get("price"));
         },
         message: "Giá khuyến mãi phải là số hữu hạn và không vượt quá giá gốc",
       },
@@ -66,6 +67,7 @@ const productVariantSchema = new Schema<IProductVariant>(
       validate: { validator: Number.isSafeInteger, message: "Tồn kho phải là số nguyên an toàn" },
     },
 
+    quarantine_quantity: { type: Number, default: 0, min: 0, validate: { validator: Number.isSafeInteger, message: "Hàng cách ly phải là số nguyên an toàn" } },
     status: {
       type: Boolean,
       default: true,

@@ -1,4 +1,4 @@
-import CategoryPage from "@/components/product/CategoryPage";
+import CategoryEntry from "@/components/product/CategoryEntry";
 
 export const dynamic = "force-dynamic";
 
@@ -11,5 +11,5 @@ export default async function CategoryRoute({
 }) {
   const { slug } = await params;
   const { nhom } = await searchParams;
-  return <CategoryPage key={`${slug}:${nhom ?? ""}`} slug={slug} audience={nhom} />;
+  return <CategoryEntry slug={slug} audience={nhom} />;
 }

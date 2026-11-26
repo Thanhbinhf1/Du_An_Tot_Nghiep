@@ -4,12 +4,14 @@ import { requireAdmin } from "../middlewares/adminMiddleware.js";
 import {
   validateVariantIds, getProductVariants, getAdminProductVariants, createProductVariant,
   updateProductVariant, deleteProductVariant,
+  createProductVariantsBatch,
 } from "../controllers/productVariantController.js";
 
 const router = Router({ mergeParams: true });
 router.get("/admin", protect, requireAdmin, validateVariantIds, getAdminProductVariants);
 router.get("/", validateVariantIds, getProductVariants);
 router.post("/", protect, requireAdmin, validateVariantIds, createProductVariant);
+router.post("/batch", protect, requireAdmin, validateVariantIds, createProductVariantsBatch);
 router.patch("/:variantId", protect, requireAdmin, validateVariantIds, updateProductVariant);
 router.delete("/:variantId", protect, requireAdmin, validateVariantIds, deleteProductVariant);
 export default router;

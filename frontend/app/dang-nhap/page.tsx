@@ -13,11 +13,22 @@ export default function DangNhapPage() {
   return <Suspense><LoginForm /></Suspense>;
 }
 
+function customerDestination(value: string) {
+  if (/^\/outfit\?bo-phoi=[a-f\d]{24}#shop-the-look$/i.test(value)) return value;
+  const match = /^(\/product\/[a-f\d]{24})(?:\?([^#]*))?(#product-reviews)?$/i.exec(value);
+  if (!match) return undefined;
+  const query = new URLSearchParams(match[2]);
+  for (const [key, selection] of query) {
+    if (!["color", "size"].includes(key) || !selection.trim() || selection.length > 120) return undefined;
+  }
+  return match[1] + (query.size ? `?${query}` : "") + (match[3] ?? "");
+}
+
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const returnTo = params.get("returnTo") ?? "";
-  const reviewDestination = /^\/product\/[a-f\d]{24}#product-reviews$/i.test(returnTo) ? returnTo : undefined;
+  const destination = customerDestination(returnTo);
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [account, setAccount] = useState("");
@@ -41,7 +52,7 @@ function LoginForm() {
         token: string;
       }>(response);
       signIn(user.email, user.role, user.token, remember);
-      router.replace(reviewDestination ?? (user.role === "customer" ? "/profile" : "/admin"));
+      router.replace(destination ?? (user.role === "customer" ? "/profile" : "/admin"));
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Không thể đăng nhập.");
     } finally {
@@ -107,7 +118,7 @@ function LoginForm() {
             <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
             <span>Duy trì đăng nhập</span>
           </label>
-          <Link className={styles.textLink} href="/contact">Quên mật khẩu?</Link>
+          <Link className={styles.textLink} href="/quen-mat-khau">Quên mật khẩu?</Link>
         </div>
 
         <button className={styles.submit} type="submit" disabled={submitting}>
@@ -116,7 +127,7 @@ function LoginForm() {
         {loginError && <p className={styles.loginError} role="alert">{loginError}</p>}
       </form>
 
-      <GoogleSignIn remember={remember} redirectTo={reviewDestination} />
+      <GoogleSignIn remember={remember} redirectTo={destination} />
       <p className={styles.switch}>
         Chưa có tài khoản? <Link href="/dang-ky">Đăng ký ngay</Link>
       </p>

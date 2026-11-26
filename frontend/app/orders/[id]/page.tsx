@@ -4,10 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useDemoAuth } from "@/lib/demo-auth";
+import CancelOrderButton from "@/components/orders/CancelOrderButton";
 import { formatVnd } from "@/data/products";
 import {
   getBackendOrder,
-  cancelBackendOrder,
   orderStatusText,
   paymentMethodText,
   paymentStatusText,
@@ -42,7 +42,6 @@ function OrderDetails({ id, token }: { id: string; token: string }) {
   const router = useRouter();
   const [order, setOrder] = useState<BackendOrderDetail>();
   const [error, setError] = useState("");
-  const [cancelling, setCancelling] = useState(false);
   const [cancelMessage, setCancelMessage] = useState("");
   const [paying, setPaying] = useState(false);
 
@@ -64,20 +63,10 @@ function OrderDetails({ id, token }: { id: string; token: string }) {
     }
   }, [order]);
 
-  async function handleCancel() {
-    if (!window.confirm("Bạn có chắc chắn muốn hủy đơn hàng này?")) return;
-    setCancelling(true);
+  function handleCancelled() {
     setError("");
-    setCancelMessage("");
-    try {
-      await cancelBackendOrder(id, token);
-      setCancelMessage("Đã hủy đơn hàng thành công.");
-      loadOrder();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Không thể hủy đơn hàng.");
-    } finally {
-      setCancelling(false);
-    }
+    setCancelMessage("Đã hủy đơn hàng thành công.");
+    loadOrder();
   }
 
   async function handleResumePayment() {
@@ -103,14 +92,8 @@ function OrderDetails({ id, token }: { id: string; token: string }) {
       : steps.findIndex((s) => s.key === order.order_status)
     : 0;
 
-  const canCancel =
-    order?.order_status === "pending" &&
-    order?.payment_method === "COD" &&
-    order?.payment_status === "pending";
-
-  const canPay = order?.order_status === "pending" &&
-    order.payment_status === "pending" &&
-    order.payment_method !== "COD";
+  const canCancel = order?.actions?.cancel;
+  const canPay = order?.actions?.pay;
 
   return (
     <article className="container" style={{ paddingTop: 28, paddingBottom: 64, maxWidth: 920 }}>
@@ -137,9 +120,9 @@ function OrderDetails({ id, token }: { id: string; token: string }) {
           {/* TIẾN TRÌNH ĐƠN HÀNG (TIMELINE TRACKING) */}
           <div className="panel tracking-card" style={{ padding: 24, background: "#fff", border: "1px solid #e0e0e0" }}>
             <h2 style={{ fontSize: 16, margin: "0 0 16px" }}>Tiến trình đơn hàng</h2>
-            {order.order_status === "cancelled" ? (
+            {["cancelled", "delivery_failed", "returning", "returned"].includes(order.order_status) ? (
               <div style={{ padding: 14, background: "#fff1f0", color: "#b42318", borderRadius: 4, fontWeight: 600 }}>
-                ✕ Đơn hàng này đã được hủy.
+                {orderStatusText[order.order_status]}. {order.order_status === "delivery_failed" ? "Shop sẽ liên hệ để thống nhất giao lại hoặc hoàn hàng." : order.order_status === "returning" ? "Đơn đang được chuyển về shop để kiểm tra." : order.order_status === "returned" ? "Shop đã nhận và kiểm tra hàng hoàn; khoản hoàn tiền (nếu có) sẽ được đối soát riêng." : "Đơn hàng đã dừng xử lý."}
               </div>
             ) : (
               <div className="tracking-steps" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
@@ -162,6 +145,7 @@ function OrderDetails({ id, token }: { id: string; token: string }) {
                 })}
               </div>
             )}
+            {order.cancellation_reason && <div style={{ marginTop: 12 }}><strong>Lý do hủy đơn</strong><p>{order.cancellation_reason}</p></div>}
           </div>
 
           {/* THÔNG TIN GIAO NHẬN & THANH TOÁN */}
@@ -209,6 +193,7 @@ function OrderDetails({ id, token }: { id: string; token: string }) {
               <p style={{ margin: "4px 0", fontSize: 13 }}>
                 Trạng thái đơn hàng: <strong>{orderStatusText[order.order_status] ?? order.order_status}</strong>
               </p>
+              {order.payment_status === "refunded" && order.refund && <p>Số tiền đã hoàn <strong>{formatVnd(order.refund.amount)}</strong></p>}
 
               <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {canPay && (
@@ -222,17 +207,9 @@ function OrderDetails({ id, token }: { id: string; token: string }) {
                   </button>
                 )}
                 {canCancel && (
-                  <button
-                    type="button"
-                    className="pill-button small-pill"
-                    disabled={cancelling}
-                    onClick={handleCancel}
-                    style={{ color: "#b42318", borderColor: "#fecaca" }}
-                  >
-                    {cancelling ? "Đang hủy..." : "Hủy đơn hàng"}
-                  </button>
+                  <CancelOrderButton orderId={id} token={token} onCancelled={handleCancelled} />
                 )}
-                {order.payment_method !== "COD" && (
+                {["SePay", "MoMo", "BankTransfer"].includes(order.payment_method) && (
                   <Link
                     href={`/payment/result?orderId=${encodeURIComponent(order._id)}`}
                     className="pill-button small-pill"

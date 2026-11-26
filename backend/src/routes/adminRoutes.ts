@@ -1,47 +1,32 @@
+import { uploadDirectory } from "../config/uploadStorage.js";
 import { Router } from "express";
+import { normalizeRequestBody } from "../middlewares/requestBodyMiddleware.js";
 import multer from "multer";
 import path from "node:path";
 import { ContactController } from "../controllers/contactController.js";
 import { OrderController } from "../controllers/orderController.js";
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { mkdir, writeFile } from "node:fs/promises";
+import { imageExtensions, validateImageContent } from "../services/imageUpload.js";
 import { protect, type AuthRequest } from "../middlewares/authMiddleware.js";
 import { requireAdmin, requireAdminOrStaff } from "../middlewares/adminMiddleware.js";
 import { AdminController } from "../controllers/adminController.js";
 import { ReviewReportController } from "../controllers/reviewReportController.js";
 import { AppError } from "../middlewares/AppError.js";
+import { CategoryController } from "../controllers/categoryController.js";
+import { AdminAnalyticsController } from "../controllers/adminAnalyticsController.js";
+import { AdminCustomerController } from "../controllers/adminCustomerController.js";
+import { OrderReturnController } from "../controllers/orderReturnController.js";
+import { ReviewModerationController } from "../controllers/reviewModerationController.js";
+import { InventoryOperationsController } from "../controllers/inventoryOperationsController.js";
+import { StorefrontContentController } from "../controllers/storefrontContentController.js";
 
 const router = Router();
-const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-const uploadDirectory = path.resolve(currentDirectory, "../../uploads");
-const imageExtensions: Record<string, string> = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
-  "image/webp": ".webp",
-};
+router.use(normalizeRequestBody);
+
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, callback) => {
-      void mkdir(uploadDirectory, { recursive: true }).then(
-        () => callback(null, uploadDirectory),
-        (error: unknown) =>
-          callback(
-            error instanceof Error ? error : new Error("Không thể tạo thư mục ảnh."),
-            uploadDirectory,
-          ),
-      );
-    },
-    filename: (_req, file, callback) => {
-      const extension = imageExtensions[file.mimetype];
-      if (!extension) {
-        callback(new AppError("Chỉ chấp nhận ảnh JPG, PNG hoặc WEBP.", 400), "");
-        return;
-      }
-      callback(null, `${randomUUID()}${extension}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, callback) => {
     if (!imageExtensions[file.mimetype]) {
@@ -64,30 +49,43 @@ router.get("/session", (req: AuthRequest, res) => {
 });
 
 // 1. Dashboard metrics
-router.get("/dashboard", AdminController.getDashboardStats);
+router.get("/dashboard", AdminAnalyticsController.dashboard);
+router.get("/activity", requireAdmin, AdminAnalyticsController.activity);
 
 // 2. Orders
 router.get("/orders", AdminController.getOrders);
 router.patch("/orders/:id/status", OrderController.updateOrderStatus);
 router.patch("/orders/:id/cancel", AdminController.cancelOrderAdmin);
+router.get("/orders/:id/operations", OrderReturnController.detail);
+router.patch("/orders/:id/delivery", OrderReturnController.transition);
+router.post("/orders/:id/return-receipt", OrderReturnController.receive);
+router.post("/orders/:id/refund", requireAdmin, OrderReturnController.recordRefund);
+router.patch("/orders/:id/return-claim", OrderReturnController.resolveClaim);
 
 // 3. Inventory
 router.get("/inventory", AdminController.getInventory);
 router.patch("/inventory/:id", AdminController.updateInventoryStock);
+router.post("/inventory/:id/quarantine", requireAdmin, OrderReturnController.quarantine);
+router.post("/inventory/:id/adjustment", InventoryOperationsController.adjust);
+router.get("/inventory/:id/history", InventoryOperationsController.history);
 
 // 4. Customers & Users (Role change & block are Admin-only)
-router.get("/customers", AdminController.getCustomers);
+router.get("/customers", AdminCustomerController.list);
+router.get("/customers/:id/orders", AdminCustomerController.orders);
 router.get("/users", requireAdmin, AdminController.getUsers);
-router.patch("/users/:id/status", requireAdmin, AdminController.updateUserStatus);
-router.patch("/customers/:id/role", requireAdmin, AdminController.updateCustomerRole);
-router.patch("/customers/:id/block", requireAdmin, AdminController.toggleCustomerBlock);
+router.patch("/users/:id/status", requireAdmin, AdminCustomerController.block);
+router.patch("/customers/:id/role", requireAdmin, AdminCustomerController.role);
+router.patch("/customers/:id/block", requireAdmin, AdminCustomerController.block);
 
 // 5. Payments
 router.get("/payments", AdminController.getPayments);
 
 // 6. Reviews & Comments
 router.get("/reviews", AdminController.getReviews);
-router.delete("/reviews/:id", AdminController.deleteReview);
+router.patch("/reviews/:id/moderation", ReviewModerationController.mask);
+router.get("/blocked-words", ReviewModerationController.words);
+router.post("/blocked-words", requireAdmin, ReviewModerationController.saveWord);
+router.patch("/blocked-words/:id", requireAdmin, ReviewModerationController.toggleWord);
 router.get("/review-reports", ReviewReportController.list);
 router.patch("/review-reports/:id/dismiss", ReviewReportController.dismiss);
 
@@ -106,6 +104,8 @@ router.delete("/size-recommendations/:id", AdminController.deleteSizeRecommendat
 // 9. Store Settings (Admin-only for updates)
 router.get("/settings", AdminController.getSettings);
 router.put("/settings", requireAdmin, AdminController.updateSettings);
+router.get("/storefront-content/home", requireAdmin, StorefrontContentController.adminHero);
+router.put("/storefront-content/home", requireAdmin, StorefrontContentController.publishHero);
 
 // 10. Coupons (Delete is Admin-only)
 router.get("/coupons", AdminController.getCoupons);
@@ -114,9 +114,9 @@ router.put("/coupons/:id", AdminController.saveCoupon);
 router.delete("/coupons/:id", requireAdmin, AdminController.deleteCoupon);
 
 // 11. Categories & Products
-router.post("/categories", requireAdmin, AdminController.createCategory);
-router.put("/categories/:id", requireAdmin, AdminController.updateCategory);
-router.delete("/categories/:id", requireAdmin, AdminController.deleteCategory);
+router.post("/categories", requireAdmin, CategoryController.createCategory);
+router.put("/categories/:id", requireAdmin, CategoryController.updateCategory);
+router.delete("/categories/:id", requireAdmin, CategoryController.deleteCategory);
 router.post("/products", requireAdmin, AdminController.createProduct);
 router.put("/products/:id", requireAdmin, AdminController.updateProduct);
 router.delete("/products/:id", requireAdmin, AdminController.deleteProduct);
@@ -126,12 +126,18 @@ router.get("/contacts", ContactController.list);
 router.patch("/contacts/:id", ContactController.updateStatus);
 
 // Uploads
-router.post("/uploads", requireAdmin, upload.single("image"), (req, res, next) => {
+router.post("/uploads", requireAdmin, upload.single("image"), async (req, res, next) => {
   if (!req.file) {
     next(new AppError("Vui lòng chọn ảnh để tải lên.", 400));
     return;
   }
-  res.status(201).json({ status: "success", data: { url: `/uploads/${req.file.filename}` } });
+  try {
+    const extension = validateImageContent(req.file.buffer, req.file.mimetype);
+    const filename = `${randomUUID()}${extension}`;
+    await mkdir(uploadDirectory, { recursive: true });
+    await writeFile(path.join(uploadDirectory, filename), req.file.buffer, { flag: "wx" });
+    res.status(201).json({ status: "success", data: { url: `/uploads/${filename}` } });
+  } catch (error) { next(error); }
 });
 
 export default router;

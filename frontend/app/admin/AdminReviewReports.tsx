@@ -15,13 +15,13 @@ type ReviewReport = {
   reason: ReviewReportReason;
   details: string;
   createdAt: string;
-  status: "pending" | "dismissed" | "removed";
+  status: "pending" | "dismissed" | "removed" | "masked";
   current?: { comment: string; rating: number };
 };
 
 type ReportPage = { reports: ReviewReport[]; hasMore: boolean };
 
-const statusLabels = { pending: "Chờ xử lý", dismissed: "Đã bỏ qua", removed: "Đã gỡ đánh giá" };
+const statusLabels = { pending: "Chờ xử lý", dismissed: "Đã bỏ qua", removed: "Đánh giá cũ đã gỡ", masked: "Đã che nội dung, giữ số sao" };
 
 export default function AdminReviewReports({ request }: { request: AdminRequest }) {
   const [data, setData] = useState<ReportPage>();
@@ -54,14 +54,14 @@ export default function AdminReviewReports({ request }: { request: AdminRequest 
   }
 
   async function moderate(report: ReviewReport, remove: boolean) {
-    if (remove && !window.confirm("Gỡ đánh giá này khỏi trang sản phẩm?")) return;
+    if (remove && !window.confirm("Che nội dung vi phạm bằng dấu * và giữ nguyên số sao?")) return;
     setBusyId(report._id);
     setError("");
     setNotice("");
     try {
       if (remove) {
-        await request(`/admin/reviews/${report.review_id}`, { method: "DELETE" });
-        setNotice("Đã gỡ đánh giá. Các báo cáo liên quan đã chuyển vào lịch sử.");
+        await request(`/admin/reviews/${report.review_id}/moderation`, { method: "PATCH", body: JSON.stringify({ mask_all: true }) });
+        setNotice("Đã che nội dung và giữ số sao. Các báo cáo liên quan đã chuyển vào lịch sử.");
       } else {
         await request(`/admin/review-reports/${report._id}/dismiss`, { method: "PATCH" });
         setNotice("Đã bỏ qua báo cáo.");
@@ -121,7 +121,7 @@ export default function AdminReviewReports({ request }: { request: AdminRequest 
                   <td>
                     {report.status === "pending" ? (
                       <div className="admin-review-report-actions">
-                        <button type="button" className="danger-btn" disabled={Boolean(busyId)} onClick={() => void moderate(report, true)}>Gỡ đánh giá</button>
+                        <button type="button" className="danger-btn" disabled={Boolean(busyId)} onClick={() => void moderate(report, true)}>Che nội dung vi phạm</button>
                         <button type="button" className="admin-button secondary-btn" disabled={Boolean(busyId)} onClick={() => void moderate(report, false)}>Bỏ qua</button>
                       </div>
                     ) : statusLabels[report.status]}

@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { AdminRequest } from "./ProductVariantsManager";
+import type { AdminPaginatedRequest } from "./ProductVariantsManager";
+import { navigate } from "./adminNavigation";
+import type { ApiPagination } from "@/lib/api";
+import AdminPagination, { adminListPath } from "./AdminPagination";
+import AdminIcon from "./AdminIcon";
+import { paymentMethodText } from "@/lib/order-api";
 
 type PaymentRecord = {
   _id: string;
@@ -11,18 +16,23 @@ type PaymentRecord = {
     receiver_phone: string;
     final_amount: number;
     order_status: string;
+    payment_status?: string;
+    refund?: { amount: number; reference: string };
     payment_method: string;
     created_at: string;
   } | null;
-  payment_method: "VNPay" | "SePay" | "MoMo" | "BankTransfer";
+  payment_method: "PayOS" | "VNPay" | "SePay" | "MoMo" | "BankTransfer";
   transaction_id: string;
   status: "pending" | "success" | "failed";
   paid_at?: string | null;
   created_at: string;
 };
 
-export default function AdminPayments({ request }: { request: AdminRequest }) {
+export default function AdminPayments({ paginatedRequest }: { paginatedRequest: AdminPaginatedRequest }) {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [revision, setRevision] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<ApiPagination>();
   const [statusFilter, setStatusFilter] = useState("all");
   const [methodFilter, setMethodFilter] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -31,108 +41,90 @@ export default function AdminPayments({ request }: { request: AdminRequest }) {
   const formatPrice = (val: number) =>
     `${new Intl.NumberFormat("vi-VN").format(val)} đ`;
 
-  const fetchPayments = useCallback((signal?: AbortSignal) =>
-    request<PaymentRecord[]>(`/admin/payments?status=${statusFilter === "all" ? "" : statusFilter}&method=${methodFilter === "all" ? "" : methodFilter}`, { signal })
-      .then((data) => {
+  const fetchPayments = useCallback((signal: AbortSignal) =>
+    paginatedRequest<PaymentRecord[]>(adminListPath("/admin/payments", { page, limit: 25, summary: 1, status: statusFilter, method: methodFilter }), { signal })
+      .then(({ data, pagination }) => {
         if (signal?.aborted) return;
         setPayments(data);
+        setPagination(pagination);
         setError("");
       })
       .catch((cause: unknown) => {
         if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "Không thể tải danh sách giao dịch thanh toán.");
       })
       .finally(() => { if (!signal?.aborted) setLoading(false); }),
-  [request, statusFilter, methodFilter]);
+  [paginatedRequest, page, statusFilter, methodFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
     void fetchPayments(controller.signal);
     return () => controller.abort();
-  }, [fetchPayments]);
+  }, [fetchPayments, revision]);
 
-  const totalCollected = payments
-    .filter((p) => p.status === "success")
-    .reduce((sum, p) => sum + (p.order_id?.final_amount ?? 0), 0);
-
-  const pendingCount = payments.filter((p) => p.status === "pending").length;
+  const totals = loading || error ? undefined : pagination?.paymentTotals;
 
   return (
     <div className="admin-payments-page">
       <div className="admin-panel">
         <div className="admin-toolbar">
           <div>
-            <h2>Quản lý giao dịch thanh toán & Đối soát</h2>
+            <h2>Giao dịch & Đối soát</h2>
             <p className="admin-muted">
-              Kiểm tra tình trạng thanh toán qua BankTransfer, VNPay, SePay, MoMo ({payments.length} giao dịch).
+              Kiểm tra tình trạng thanh toán và chứng từ của đơn hàng.
             </p>
           </div>
           <button
             type="button"
             className="admin-button"
-            onClick={() => { setLoading(true); void fetchPayments(); }}
+            onClick={() => { setLoading(true); setRevision((value) => value + 1); }}
             disabled={loading}
           >
-            {loading ? "Đang tải..." : "🔄 Làm mới giao dịch"}
+            {loading ? "Đang tải..." : "Làm mới giao dịch"}
           </button>
         </div>
 
         {error && <p className="admin-alert">{error}</p>}
 
         {/* METRICS ROW */}
-        <div className="admin-overview" style={{ marginBottom: "18px" }}>
-          <article className="admin-stat-card primary">
-            <span className="admin-stat-icon">💳</span>
-            <div>
-              <p>Đã thu qua cổng/chuyển khoản</p>
-              <strong>{formatPrice(totalCollected)}</strong>
-              <small>Giao dịch thành công</small>
-            </div>
-          </article>
-
-          <article className="admin-stat-card">
-            <span className="admin-stat-icon admin-stat-icon-red">⏳</span>
-            <div>
-              <p>Chờ xác nhận / Đối soát</p>
-              <strong>{pendingCount} giao dịch</strong>
-              <small>Cần kiểm tra sao kê hoặc IPN</small>
-            </div>
-          </article>
+        <div className="admin-metric-grid admin-metric-grid-three" aria-label="Tổng giao dịch theo bộ lọc">
+          <article className="admin-metric-card"><span className="admin-tile-icon tone-green"><AdminIcon name="payments" /></span><div><span>Đã thu theo bộ lọc</span><strong>{totals ? formatPrice(totals.collected) : "—"}</strong></div></article>
+          <article className="admin-metric-card"><span className="admin-tile-icon tone-blue"><AdminIcon name="refund" /></span><div><span>Đã ghi nhận hoàn tiền</span><strong>{totals ? formatPrice(totals.refunded) : "—"}</strong></div></article>
+          <article className="admin-metric-card"><span className="admin-tile-icon tone-amber"><AdminIcon name="work" /></span><div><span>Giao dịch chờ xác nhận</span><strong>{totals?.pending ?? "—"}</strong></div></article>
         </div>
 
         {/* FILTERS BAR */}
         <div className="admin-filter-bar">
           <div className="filter-select-group">
-            <label>Phương thức:</label>
+            <label htmlFor="admin-payment-method">Phương thức</label>
             <select
+              id="admin-payment-method"
               value={methodFilter}
-              onChange={(e) => { setLoading(true); setMethodFilter(e.target.value); }}
+              onChange={(e) => { setLoading(true); setPage(1); setMethodFilter(e.target.value); }}
               className="admin-select"
             >
               <option value="all">Tất cả cổng</option>
-              <option value="BankTransfer">Chuyển khoản (BankTransfer)</option>
-              <option value="VNPay">Cổng VNPay</option>
-              <option value="SePay">SePay</option>
-              <option value="MoMo">Ví MoMo</option>
+              {(["BankTransfer", "SePay", "MoMo", "VNPay", "PayOS"] as const).map((method) => <option value={method} key={method}>{paymentMethodText[method]}</option>)}
             </select>
           </div>
 
           <div className="filter-select-group">
-            <label>Trạng thái:</label>
+            <label htmlFor="admin-payment-state">Trạng thái</label>
             <select
+              id="admin-payment-state"
               value={statusFilter}
-              onChange={(e) => { setLoading(true); setStatusFilter(e.target.value); }}
+              onChange={(e) => { setLoading(true); setPage(1); setStatusFilter(e.target.value); }}
               className="admin-select"
             >
               <option value="all">Tất cả trạng thái</option>
-              <option value="success">Thành công (success)</option>
-              <option value="pending">Đang chờ (pending)</option>
-              <option value="failed">Thất bại (failed)</option>
+              <option value="success">Đã thu tiền</option>
+              <option value="pending">Chờ xác nhận</option>
+              <option value="failed">Thất bại</option>
             </select>
           </div>
         </div>
 
         {/* PAYMENTS TABLE */}
-        <div className="admin-table-wrap">
+        <div className="admin-table-wrap" role="region" aria-label="Bảng thanh toán" tabIndex={0}>
           <table className="admin-table">
             <thead>
               <tr>
@@ -147,10 +139,10 @@ export default function AdminPayments({ request }: { request: AdminRequest }) {
               </tr>
             </thead>
             <tbody>
-              {payments.length === 0 ? (
+              {loading || error || payments.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="admin-empty">
-                    {loading ? "Đang tải dữ liệu giao dịch..." : "Không có giao dịch nào phù hợp."}
+                    {loading ? "Đang tải dữ liệu giao dịch..." : error ? "Chưa thể hiển thị danh sách giao dịch." : "Không có giao dịch nào phù hợp."}
                   </td>
                 </tr>
               ) : (
@@ -163,7 +155,7 @@ export default function AdminPayments({ request }: { request: AdminRequest }) {
                     </td>
                     <td>
                       {p.order_id ? (
-                        <strong>#{p.order_id._id.slice(-8).toUpperCase()}</strong>
+                        <button className="workspace-link" onClick={() => navigate("orders", { search: p.order_id!._id })}>#{p.order_id._id.slice(-8).toUpperCase()}</button>
                       ) : (
                         <span className="admin-muted">Đơn đã xóa</span>
                       )}
@@ -198,6 +190,7 @@ export default function AdminPayments({ request }: { request: AdminRequest }) {
                       >
                         {p.status === "success" ? "Thành công" : p.status === "pending" ? "Đang chờ" : "Thất bại"}
                       </span>
+                      {p.order_id?.payment_status === "refunded" && <p>Đơn đã hoàn tiền: {formatPrice(p.order_id.refund?.amount ?? 0)}<br/><small>Mã hoàn: {p.order_id.refund?.reference}</small></p>}
                     </td>
                     <td>
                       {p.paid_at ? (
@@ -212,6 +205,7 @@ export default function AdminPayments({ request }: { request: AdminRequest }) {
             </tbody>
           </table>
         </div>
+        <AdminPagination page={page} pagination={pagination} loading={loading} onPage={(value) => { setPage(value); setLoading(true); }} />
       </div>
     </div>
   );

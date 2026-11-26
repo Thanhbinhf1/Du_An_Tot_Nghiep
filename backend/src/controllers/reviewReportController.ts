@@ -66,11 +66,11 @@ export class ReviewReportController {
         { $set: { current: { $first: "$current" } } },
         { $set: { status: {
           $cond: [
-            { $ne: [{ $ifNull: ["$dismissed_at", null] }, null] }, "dismissed",
+            { $ne: [{ $ifNull: ["$dismissed_at", null] }, null] }, { $cond: [{ $eq: ["$resolution", "masked"] }, "masked", "dismissed"] },
             { $cond: [{ $ifNull: ["$current", false] }, "pending", "removed"] },
           ],
         } } },
-        { $match: { status: history ? { $in: ["dismissed", "removed"] } : "pending" } },
+        { $match: { status: history ? { $in: ["dismissed", "removed", "masked"] } : "pending" } },
         { $skip: (page - 1) * pageSize },
         { $limit: pageSize + 1 },
         { $project: { reporter_id: 0, dismissed_by: 0 } },

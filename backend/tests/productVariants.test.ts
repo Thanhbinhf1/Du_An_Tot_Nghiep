@@ -59,7 +59,7 @@ test("schema chuẩn hóa SKU và kiểm tra giá, tồn kho", async () => {
   assert.equal(doc.size, "M");
   assert.equal(doc.color, "Red");
   await doc.validate();
-  for (const invalid of [{ stock_quantity: 1.5 }, { stock_quantity: -1 }, { price: Infinity }, { sale_price: 201 }, { sale_price: -1 }]) {
+  for (const invalid of [{ stock_quantity: 1.5 }, { stock_quantity: -1 }, { price: Infinity }, { price: 100.5 }, { price: Number.MAX_SAFE_INTEGER + 1 }, { sale_price: 150.25 }, { sale_price: 201 }, { sale_price: -1 }]) {
     await assert.rejects(new ProductVariant({ ...valid, product_id: productId, ...invalid }).validate(), mongoose.Error.ValidationError);
   }
   doc.sale_price = 150;
@@ -102,20 +102,10 @@ test("mọi thao tác ghi yêu cầu đăng nhập và quyền admin", async () 
   }
 });
 
-test("POST tạo biến thể đã chuẩn hóa và trả 201", async () => {
-  const token = authorize();
-  mock.method(Product, "findById", async () => ({ _id: productId }));
-  mock.method(ProductVariant, "create", async (input: any) => {
-    assert.deepEqual(input, { ...valid, sku: "SHIRT-M-RED", size: "M", color: "Red", product_id: productId });
-    return { _id: variantId, ...input };
-  });
-  assert.equal((await request("POST", valid, "", token)).status, 201);
-});
-
 test("POST/PATCH từ chối kiểu sai, trường lạ và cập nhật rỗng", async () => {
   const token = authorize();
   const invalid = [null, [], {}, { ...valid, sku: 10 }, { ...valid, size: " " },
-    { ...valid, price: "200" }, { ...valid, price: null }, { ...valid, status: "false" },
+    { ...valid, price: "200" }, { ...valid, price: null }, { ...valid, price: 100.5 }, { ...valid, sale_price: 100.5 }, { ...valid, status: "false" },
     { ...valid, stock_quantity: 0.5 }, { ...valid, sale_price: -1 }, { ...valid, product_id: productId }];
   for (const body of invalid) {
     assert.equal((await request("POST", body, "", token)).status, 400, JSON.stringify(body));
@@ -125,91 +115,9 @@ test("POST/PATCH từ chối kiểu sai, trường lạ và cập nhật rỗng"
   assert.equal((await request("PATCH", { price: 100 }, "/invalid", token)).status, 400);
 });
 
-test("POST trả 404 cho sản phẩm không tồn tại và 409 cho duplicate key", async () => {
-  const token = authorize();
-  const lookup = mock.method(Product, "findById", async (): Promise<any> => null);
-  assert.equal((await request("POST", valid, "", token)).status, 404);
-  lookup.mock.mockImplementation(async () => ({ _id: productId }));
-  mock.method(ProductVariant, "create", async () => { throw Object.assign(new Error("duplicate"), { code: 11000 }); });
-  assert.equal((await request("POST", valid, "", token)).status, 409);
-});
-
-test("PATCH kiểm tra giá sau khi gộp với dữ liệu cũ; cho phép bỏ giá giảm", async () => {
-  const token = authorize();
-  mock.method(Product, "exists", async () => ({ _id: productId }));
-  const doc = new ProductVariant({ ...valid, _id: variantId, product_id: productId, sale_price: 150 });
-  mock.method(ProductVariant, "findOne", async (filter: unknown) => {
-    assert.deepEqual(filter, { _id: variantId, product_id: productId });
-    return doc;
-  });
-  mock.method(doc, "save", async () => { await doc.validate(); return doc; });
-  assert.equal((await request("PATCH", { price: 100 }, `/${variantId}`, token)).status, 400);
-  const response = await request("PATCH", { price: 100, sale_price: null, stock_quantity: 0, status: false }, `/${variantId}`, token);
-  assert.equal(response.status, 200);
-  const { data } = await response.json();
-  assert.equal(data.price, 100);
-  assert.equal(data.sale_price, null);
-  assert.equal(data.stock_quantity, 0);
-  assert.equal(data.status, false);
-});
-
-test("PATCH/DELETE không thao tác biến thể thuộc sản phẩm khác", async () => {
-  const token = authorize();
-  mock.method(Product, "exists", async () => ({ _id: productId }));
-  mock.method(ProductVariant, "findOne", async (filter: unknown) => {
-    assert.deepEqual(filter, { _id: variantId, product_id: productId });
-    return null;
-  });
-  assert.equal((await request("PATCH", { price: 100 }, `/${variantId}`, token)).status, 404);
-  assert.equal((await request("DELETE", undefined, `/${variantId}`, token)).status, 404);
-});
-
-test("DELETE ngừng bán và giữ bản ghi tham chiếu", async () => {
-  const token = authorize();
-  mock.method(Product, "exists", async () => ({ _id: productId }));
-  const doc = new ProductVariant({ ...valid, _id: variantId, product_id: productId });
-  mock.method(ProductVariant, "findOne", async () => doc);
-  const save = mock.method(doc, "save", async () => doc);
-  const remove = mock.method(ProductVariant, "deleteOne", () => { throw new Error("Không được xóa cứng"); });
-  assert.equal((await request("DELETE", undefined, `/${variantId}`, token)).status, 200);
-  assert.equal(doc.status, false);
-  assert.equal(save.mock.callCount(), 1);
-  assert.equal(remove.mock.callCount(), 0);
-});
-
-test("PATCH/DELETE trả 404 khi sản phẩm cha không tồn tại", async () => {
-  const token = authorize();
-  mock.method(Product, "exists", async () => null);
-  const lookup = mock.method(ProductVariant, "findOne", () => { throw new Error("Không được tìm biến thể mồ côi"); });
-  assert.equal((await request("PATCH", { price: 100 }, `/${variantId}`, token)).status, 404);
-  assert.equal((await request("DELETE", undefined, `/${variantId}`, token)).status, 404);
-  assert.equal(lookup.mock.callCount(), 0);
-});
-
-test("PATCH trả 409 khi trùng khóa hoặc phiên bản đã thay đổi", async () => {
-  const token = authorize();
-  mock.method(Product, "exists", async () => ({ _id: productId }));
-  const doc = new ProductVariant({ ...valid, _id: variantId, product_id: productId });
-  mock.method(ProductVariant, "findOne", async () => doc);
-  const save = mock.method(doc, "save", async () => { throw Object.assign(new Error("duplicate"), { code: 11000 }); });
-  assert.equal((await request("PATCH", { sku: "OTHER" }, `/${variantId}`, token)).status, 409);
-  save.mock.mockImplementation(async () => { throw new mongoose.Error.VersionError(doc, 1, ["price"]); });
-  assert.equal((await request("PATCH", { price: 100 }, `/${variantId}`, token)).status, 409);
-  assert.equal(ProductVariant.schema.options.optimisticConcurrency, true);
-});
-
-test("POST kiểm tra schema thật trước khi lưu giá khuyến mãi", async () => {
-  const token = authorize();
-  mock.method(Product, "findById", async () => ({ _id: productId }));
-  mock.method(ProductVariant, "create", async (input: any) => {
-    const doc = new ProductVariant(input);
-    await doc.validate();
-    return doc;
-  });
-  assert.equal((await request("POST", { ...valid, sale_price: 201 }, "", token)).status, 400);
-});
-
 test("lỗi lưu trữ không dự kiến được chuyển cho error handler", async () => {
   mock.method(Product, "findOne", async () => { throw new Error("storage unavailable"); });
   assert.equal((await request("GET")).status, 500);
 });
+
+// Write-path regressions migrated to real MongoDB transactions in catalogWorkspace.test.ts (CAT-P03..P12).

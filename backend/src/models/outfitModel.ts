@@ -6,6 +6,9 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface IOutfit extends Document {
   title: string;
   description?: string;
+  style?: string;
+  occasion?: string;
+  gallery?: string[];
   image: string;
   discount_type: "percent" | "fixed";
   discount_value: number;
@@ -28,6 +31,9 @@ const outfitSchema = new Schema<IOutfit>(
       type: String,
       default: "",
     },
+    style: { type: String, trim: true, maxlength: 60 },
+    occasion: { type: String, trim: true, maxlength: 160 },
+    gallery: { type: [String], default: undefined },
     image: {
       type: String,
       required: [true, "Vui lòng cung cấp ảnh Lookbook"],

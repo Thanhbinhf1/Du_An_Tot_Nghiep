@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { getMoMoConfig } from "../config/momoConfig.js";
+import { getMoMoConfig, requireMoMoEnabled } from "../config/momoConfig.js";
 import { AppError } from "../middlewares/AppError.js";
 
 function signMoMo(content: string, secretKey: string): string {
@@ -27,6 +27,7 @@ interface MoMoCreateResponse {
 }
 
 export async function createMoMoPayment(input: CreateMoMoInput) {
+  requireMoMoEnabled();
   const config = getMoMoConfig();
 
   if (

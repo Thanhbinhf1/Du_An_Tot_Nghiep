@@ -1,5 +1,5 @@
-import CategoryPage from "@/components/product/CategoryPage";
+import CategoryEntry from "@/components/product/CategoryEntry";
 
 export default function MenPage() {
-  return <CategoryPage slug="nam" />;
+  return <CategoryEntry slug="nam" />;
 }

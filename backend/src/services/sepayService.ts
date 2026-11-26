@@ -4,6 +4,7 @@ import { getSePayConfig } from "../config/sepayConfig.js";
 import { AppError } from "../middlewares/AppError.js";
 import Order, { type IOrder } from "../models/orderModel.js";
 import Payment from "../models/paymentModel.js";
+import OrderStatusHistory from "../models/orderStatusHistoryModel.js";
 
 type SePayTransfer = {
   eventId?: string;
@@ -14,12 +15,8 @@ type SePayTransfer = {
   reference: string;
 };
 
-function paymentCode(code: unknown, content: unknown) {
-  const codes = new Set(typeof content === "string"
-    ? Array.from(content.toUpperCase().matchAll(/(?:^|[^A-Z0-9])(FS[0-9]{12})(?=$|[^A-Z0-9])/g), (match) => match[1])
-    : []);
-  if (typeof code === "string" && /^FS[0-9]{12}$/i.test(code)) codes.add(code.toUpperCase());
-  return codes.size === 1 ? Array.from(codes)[0] : undefined;
+function paymentCode(code: unknown) {
+  return typeof code === "string" && /^FS[0-9]{12}$/i.test(code) ? code.toUpperCase() : undefined;
 }
 
 export async function createSePayCheckout(order: IOrder) {
@@ -28,21 +25,16 @@ export async function createSePayCheckout(order: IOrder) {
     throw new AppError("Số tiền thanh toán SePay không hợp lệ.", 400);
   }
   const filter = { order_id: order._id, payment_method: "SePay" as const };
-  const payment = await Payment.findOneAndUpdate(filter, {
-    $setOnInsert: {
-      sepay_payment_code: `FS${randomInt(100_000_000_000, 1_000_000_000_000)}`,
-      sepay_bank_code: config.bankCode,
-      sepay_account_number: config.accountNumber,
-      sepay_account_name: config.accountName,
-      status: "pending",
-    },
-  }, { upsert: true, returnDocument: "after", runValidators: true }).catch(async (error: unknown) => {
-    if (error && typeof error === "object" && "code" in error && error.code === 11000) {
-      const existing = await Payment.findOne(filter);
-      if (existing) return existing;
-      throw new AppError("Chưa thể tạo mã thanh toán. Vui lòng thử lại trên đơn này.", 409);
-    }
-    throw error;
+  const payment = await mongoose.connection.transaction(async session => {
+    const openOrder = await Order.updateOne({ _id: order._id, payment_method: "SePay", order_status: "pending", payment_status: "pending" }, { $inc: { __v: 1 } }, { session });
+    if (!openOrder.matchedCount) throw new AppError("Đơn hàng không còn chờ thanh toán.", 409);
+    return Payment.findOneAndUpdate(filter, {
+      $setOnInsert: {
+        sepay_payment_code: "FS" + randomInt(100_000_000_000, 1_000_000_000_000),
+        sepay_bank_code: config.bankCode, sepay_account_number: config.accountNumber,
+        sepay_account_name: config.accountName, status: "pending",
+      },
+    }, { session, upsert: true, returnDocument: "after", runValidators: true });
   });
   if (payment.status !== "pending") throw new AppError("Yêu cầu thanh toán đã được xử lý.", 409);
   if (!payment.sepay_payment_code || !payment.sepay_bank_code || !payment.sepay_account_number || !payment.sepay_account_name) {
@@ -52,7 +44,7 @@ export async function createSePayCheckout(order: IOrder) {
   const transferContent = payment.sepay_bank_code.toLowerCase() === "vietinbank"
     ? `SEVQR ${payment.sepay_payment_code}`
     : payment.sepay_payment_code;
-  const qr = new URL("https://qr.sepay.vn/img");
+  const qr = new URL("https://vietqr.app/img");
   qr.search = new URLSearchParams({
     acc: payment.sepay_account_number,
     bank: payment.sepay_bank_code,
@@ -77,22 +69,27 @@ export async function createSePayCheckout(order: IOrder) {
 
 async function confirmSePayTransfer(transfer: SePayTransfer) {
   try {
-    return await mongoose.connection.transaction(async (session) => {
+    return await mongoose.connection.transaction(async (session): Promise<boolean> => {
       const payment = await Payment.findOne({
         payment_method: "SePay",
         sepay_payment_code: transfer.paymentCode,
       }).session(session);
       if (!payment || payment.sepay_account_number !== transfer.accountNumber ||
-          payment.sepay_bank_code?.toUpperCase() !== transfer.bankCode.toUpperCase()) return;
+          payment.sepay_bank_code?.toUpperCase() !== transfer.bankCode.toUpperCase()) return false;
 
       const order = await Order.findById(payment.order_id).session(session);
-      if (!order || order.payment_method !== "SePay" || order.final_amount !== transfer.amount ||
-          payment.status !== "pending" || order.payment_status !== "pending" || order.order_status !== "pending") return;
+      if (!order || order.payment_method !== "SePay" || order.final_amount !== transfer.amount) return false;
+      if (payment.status === "success") {
+        return payment.transaction_id === transfer.reference || payment.sepay_event_id === transfer.eventId;
+      }
+      const waiting = order.order_status === "pending" && order.payment_status === "pending" && payment.status === "pending";
+      const late = order.order_status === "cancelled" && order.payment_status === "failed" && payment.status === "failed";
+      if (!waiting && !late) return false;
 
       // API v2 dùng UUID, webhook dùng ID số. Mã tham chiếu ngân hàng nối hai luồng này.
       const transactionId = transfer.reference || `SEPAY-${transfer.eventId}`;
       const updated = await Payment.updateOne({
-        _id: payment._id, status: "pending",
+        _id: payment._id, status: payment.status,
       }, {
         $set: {
           status: "success",
@@ -103,20 +100,25 @@ async function confirmSePayTransfer(transfer: SePayTransfer) {
       }, { session });
       if (updated.matchedCount !== 1) throw new Error("Trạng thái thanh toán SePay đã thay đổi.");
       const updatedOrder = await Order.updateOne({
-        _id: order._id, order_status: "pending", payment_status: "pending",
+        _id: order._id, order_status: order.order_status, payment_status: order.payment_status,
       }, {
         $set: { payment_status: "success", transaction_id: transactionId },
       }, { session });
       if (updatedOrder.matchedCount !== 1) throw new Error("Trạng thái đơn hàng đã thay đổi.");
+      await OrderStatusHistory.create([{
+        order_id: order._id, status: order.order_status,
+        note: late ? "SePay xác nhận đã thu tiền sau khi hủy đơn. Chờ hoàn tiền." : "SePay xác nhận đã thu tiền.",
+      }], { session });
+      return true;
     });
   } catch (error) {
     // Unique index ngăn một giao dịch ngân hàng thanh toán cho hai đơn khác nhau.
-    if (error && typeof error === "object" && "code" in error && error.code === 11000) return;
+    if (error && typeof error === "object" && "code" in error && error.code === 11000) return false;
     throw error;
   }
 }
 
-export async function receiveSePayWebhook(authorization: string | undefined, body: unknown) {
+export async function receiveSePayWebhook(authorization: string | undefined, body: unknown): Promise<boolean> {
   const config = getSePayConfig();
   if (!config.webhookApiKey) {
     throw new AppError("Cửa hàng chưa bật xác thực webhook SePay.", 503);
@@ -130,33 +132,35 @@ export async function receiveSePayWebhook(authorization: string | undefined, bod
     throw new AppError("Dữ liệu webhook SePay không hợp lệ.", 400);
   }
   const data = body as Record<string, unknown>;
+  // SePay sends a synthetic zero ID when testing the webhook in its dashboard.
+  if (data.id === 0) return true;
   if (typeof data.id !== "number" || !Number.isSafeInteger(data.id) || data.id <= 0 ||
       typeof data.transferAmount !== "number" || !Number.isSafeInteger(data.transferAmount) || data.transferAmount <= 0 ||
       typeof data.accountNumber !== "string" || typeof data.gateway !== "string" ||
-      typeof data.content !== "string" || !["in", "out"].includes(String(data.transferType)) ||
-      typeof data.referenceCode !== "string") {
+      !["in", "out"].includes(String(data.transferType))) {
     throw new AppError("Thông tin giao dịch SePay không hợp lệ.", 400);
   }
-  if (data.transferType !== "in") return;
-  const code = paymentCode(data.code, data.content);
-  if (!code) return;
-  await confirmSePayTransfer({
+  if (data.transferType !== "in") return false;
+  const code = paymentCode(data.code);
+  if (!code) return false;
+  return confirmSePayTransfer({
     eventId: String(data.id),
     paymentCode: code,
     amount: data.transferAmount,
     bankCode: data.gateway,
     accountNumber: data.accountNumber,
-    reference: data.referenceCode.trim(),
+    reference: typeof data.referenceCode === "string" ? data.referenceCode.trim() : "",
   });
 }
 
 export async function reconcileSePayOrder(order: IOrder) {
   const config = getSePayConfig();
-  if (!config.apiToken || order.payment_method !== "SePay" || order.payment_status !== "pending") return;
+  const cancelled = order.order_status === "cancelled" && order.payment_status === "failed";
+  if (!config.apiToken || order.payment_method !== "SePay" || (order.payment_status !== "pending" && !cancelled)) return;
   const payment = await Payment.findOneAndUpdate({
     order_id: order._id,
     payment_method: "SePay",
-    status: "pending",
+    status: cancelled ? "failed" : "pending",
     $or: [
       { sepay_checked_at: { $exists: false } },
       { sepay_checked_at: { $lte: new Date(Date.now() - 15_000) } },
@@ -188,7 +192,7 @@ export async function reconcileSePayOrder(order: IOrder) {
   for (const data of transactions) {
     if (!data || typeof data !== "object" || Array.isArray(data)) continue;
     const transaction = data as Record<string, unknown>;
-    const code = paymentCode(transaction.code, transaction.transaction_content);
+    const code = paymentCode(transaction.code);
     if (code !== payment.sepay_payment_code || transaction.transfer_type !== "in" ||
         typeof transaction.id !== "string" || !transaction.id ||
         transaction.amount_out !== 0 || typeof transaction.amount_in !== "number" || !Number.isSafeInteger(transaction.amount_in) ||

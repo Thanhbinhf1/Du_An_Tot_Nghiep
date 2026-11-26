@@ -5,7 +5,7 @@ import type { AdminRequest } from "./ProductVariantsManager";
 type ProductImage = { _id: string; image_url: string; color?: string; display_order: number; is_primary: boolean };
 type ProductVariant = { color: string };
 
-export default function ProductImagesManager({ productId, request }: { productId: string; request: AdminRequest }) {
+export default function ProductImagesManager({ productId, request, onChanged }: { productId: string; request: AdminRequest; onChanged?: () => void }) {
   const [images, setImages] = useState<ProductImage[]>();
   const [colors, setColors] = useState<string[]>([]);
   const [url, setUrl] = useState("");
@@ -36,6 +36,7 @@ export default function ProductImagesManager({ productId, request }: { productId
     try {
       await action();
       setImages(await request<ProductImage[]>(path));
+      onChanged?.();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Không thể cập nhật ảnh.");
     } finally {
@@ -73,6 +74,7 @@ export default function ProductImagesManager({ productId, request }: { productId
       {!images && !error && <p role="status">Đang tải ảnh...</p>}
       {images?.map((image) => (
         <div key={image._id} className="admin-actions">
+          <img className="admin-image-thumb" src={resolveProductImage(image.image_url)} alt={`Ảnh ${image.color || "sản phẩm"}`} />
           <a href={resolveProductImage(image.image_url)} target="_blank" rel="noreferrer">Ảnh {image.display_order}</a>
           <label className="admin-image-color">
             Màu ảnh

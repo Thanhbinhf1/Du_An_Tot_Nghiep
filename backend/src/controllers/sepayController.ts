@@ -30,11 +30,12 @@ export class SePayController {
   static async reconcile(req: AuthRequest, res: Response) {
     const order = await findOrder(req, req.params.orderId, true);
     await reconcileSePayOrder(order);
-    res.json({ status: "success" });
+    const updated = await Order.findById(order._id).select("payment_status").lean();
+    res.json({ status: "success", data: { payment_status: updated?.payment_status ?? order.payment_status } });
   }
 
   static async webhook(req: Request, res: Response) {
-    await receiveSePayWebhook(req.get("Authorization"), req.body);
-    res.json({ success: true });
+    const success = await receiveSePayWebhook(req.get("Authorization"), req.body);
+    res.json({ success });
   }
 }

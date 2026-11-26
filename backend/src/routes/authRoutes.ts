@@ -1,12 +1,16 @@
 import { Router } from "express";
+import { normalizeRequestBody } from "../middlewares/requestBodyMiddleware.js";
 import { AuthController } from "../controllers/authController.js";
 import { AuthService } from "../services/authService.js";
 import { protect } from "../middlewares/authMiddleware.js";
 
 const router = Router();
+router.use(normalizeRequestBody);
 
 router.post("/register", AuthController.register);
 router.post("/login", AuthController.login);
+router.post("/forgot-password", AuthController.forgotPassword);
+router.post("/reset-password", AuthController.resetPassword);
 router.get("/google", (_req, res) => {
   res.json({ status: "success", data: { clientId: process.env.GOOGLE_CLIENT_ID?.trim() || null } });
 });

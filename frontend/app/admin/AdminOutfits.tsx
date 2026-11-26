@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Image from "next/image";
 import { resolveProductImage } from "@/lib/api";
+import { bodyKeys, garmentKeys, garmentMeasurements, measurements, type SizeRow } from "@/lib/size-guide";
 import type { AdminPaginatedRequest, AdminRequest } from "./ProductVariantsManager";
 
 type OutfitItem = {
@@ -19,6 +20,9 @@ type Outfit = {
   _id: string;
   title: string;
   description?: string;
+  style?: string;
+  occasion?: string;
+  gallery?: string[];
   image: string;
   discount_type: "percent" | "fixed";
   discount_value: number;
@@ -26,19 +30,15 @@ type Outfit = {
   items: OutfitItem[];
 };
 
-type SizeRule = {
+type SizeRule = SizeRow & {
   _id: string;
   category_id?: {
     _id: string;
     name: string;
     slug: string;
   } | null;
-  size: string;
-  min_height: number;
-  max_height: number;
-  min_weight: number;
-  max_weight: number;
-  fit_type: "Slim" | "Regular" | "Oversize";
+  product_id?: { _id: string; name: string } | null;
+  scope?: "product";
 };
 
 type SimpleProduct = {
@@ -56,6 +56,9 @@ type SimpleCategory = {
 const blankOutfitForm = {
   title: "",
   description: "",
+  style: "",
+  occasion: "",
+  galleryText: "",
   image: "",
   discount_type: "percent" as "percent" | "fixed",
   discount_value: 10,
@@ -63,14 +66,11 @@ const blankOutfitForm = {
   product_ids: [] as string[],
 };
 
-const blankSizeRuleForm = {
+const blankSizeRuleForm: SizeRow & { category_id: string; product_id: string } = {
   category_id: "",
-  size: "M",
-  min_height: 160,
-  max_height: 170,
-  min_weight: 55,
-  max_weight: 65,
-  fit_type: "Regular" as "Slim" | "Regular" | "Oversize",
+  product_id: "",
+  size: "",
+  fit_type: "Regular",
 };
 
 export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { request: AdminRequest; paginatedRequest: AdminPaginatedRequest; isAdmin: boolean }) {
@@ -85,6 +85,7 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
 
   const [editingSizeId, setEditingSizeId] = useState("");
   const [sizeForm, setSizeForm] = useState(blankSizeRuleForm);
+  const [sizeScope, setSizeScope] = useState<"category" | "product">("category");
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -138,7 +139,7 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
     try {
       await request(`/admin/outfits${editingOutfitId ? `/${editingOutfitId}` : ""}`, {
         method: editingOutfitId ? "PUT" : "POST",
-        body: JSON.stringify(outfitForm),
+        body: JSON.stringify({ ...outfitForm, gallery: [...new Set(outfitForm.galleryText.split("\n").map((line) => line.trim()).filter(Boolean))] }),
       });
       setSuccess(editingOutfitId ? "Đã cập nhật Lookbook Outfit." : "Đã tạo Outfit mới.");
       setOutfitForm(blankOutfitForm);
@@ -175,7 +176,7 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
     try {
       await request(editingSizeId ? `/admin/size-recommendations/${editingSizeId}` : "/admin/size-recommendations", {
         method: editingSizeId ? "PUT" : "POST",
-        body: JSON.stringify(sizeForm),
+        body: JSON.stringify({ ...sizeForm, product_id: sizeScope === "product" ? sizeForm.product_id : "" }),
       });
       setSuccess(editingSizeId ? "Đã cập nhật quy tắc tư vấn size." : "Đã thêm quy tắc tư vấn size.");
       resetSizeForm();
@@ -189,6 +190,7 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
 
   function resetSizeForm() {
     setEditingSizeId("");
+    setSizeScope("category");
     setSizeForm({ ...blankSizeRuleForm, category_id: categories[0]?._id ?? "" });
   }
 
@@ -267,6 +269,16 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
                   value={outfitForm.description}
                   onChange={(e) => setOutfitForm({ ...outfitForm, description: e.target.value })}
                 />
+              </label>
+
+              <label>Phong cách dùng để lọc
+                <input value={outfitForm.style} maxLength={60} onChange={(event) => setOutfitForm({ ...outfitForm, style: event.target.value })} placeholder="Ví dụ: Công sở" />
+              </label>
+              <label>Dịp mặc
+                <input value={outfitForm.occasion} maxLength={160} onChange={(event) => setOutfitForm({ ...outfitForm, occasion: event.target.value })} />
+              </label>
+              <label className="wide">Ảnh phụ (mỗi URL một dòng)
+                <textarea value={outfitForm.galleryText} rows={2} onChange={(event) => setOutfitForm({ ...outfitForm, galleryText: event.target.value })} />
               </label>
 
               <label>
@@ -402,6 +414,9 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
                                   title: o.title,
                                   image: o.image,
                                   description: o.description ?? "",
+                                  style: o.style ?? "",
+                                  occasion: o.occasion ?? "",
+                                  galleryText: o.gallery?.join("\n") ?? "",
                                   discount_type: o.discount_type,
                                   discount_value: o.discount_value,
                                   is_active: o.is_active,
@@ -438,11 +453,23 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
           <div className="admin-panel">
             <h2>{editingSizeId ? "Sửa quy tắc tư vấn size" : "Thêm quy tắc tư vấn size"}</h2>
             <p className="admin-muted">
-              Hệ thống sử dụng các ngưỡng này để tính toán size chuẩn khi khách nhập chiều cao và cân nặng trên trang /tu-van-size.
+              Nhập các khoảng số đo cơ thể dùng để tư vấn hoặc số đo thành phẩm dùng để tra bảng. Bảng riêng của sản phẩm được ưu tiên.
             </p>
 
             <form onSubmit={handleSaveSizeRule} className="admin-form">
-              <label>
+              <label>Áp dụng cho
+                <select value={sizeScope} disabled={Boolean(editingSizeId)}
+                  onChange={(event) => setSizeScope(event.target.value as "category" | "product")}>
+                  <option value="category">Danh mục</option>
+                  <option value="product">Sản phẩm riêng</option>
+                </select>
+              </label>
+              {sizeScope === "product" ? <label>Sản phẩm áp dụng
+                <select required value={sizeForm.product_id} onChange={(event) => setSizeForm({ ...sizeForm, product_id: event.target.value })}>
+                  <option value="">Chọn sản phẩm</option>
+                  {products.map((product) => <option key={product._id} value={product._id}>{product.name}</option>)}
+                </select>
+              </label> : <label>
                 Danh mục áp dụng
                 <select
                   required
@@ -455,69 +482,11 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
                     </option>
                   ))}
                 </select>
-              </label>
+              </label>}
 
               <label>
                 Kích cỡ (Size)
-                <select
-                  value={sizeForm.size}
-                  onChange={(e) => setSizeForm({ ...sizeForm, size: e.target.value })}
-                >
-                  <option value="XS">XS</option>
-                  <option value="S">S</option>
-                  <option value="M">M</option>
-                  <option value="L">L</option>
-                  <option value="XL">XL</option>
-                  <option value="XXL">XXL</option>
-                </select>
-              </label>
-
-              <label>
-                Chiều cao tối thiểu (cm)
-                <input
-                  type="number"
-                  required
-                  value={sizeForm.min_height}
-                  onChange={(e) =>
-                    setSizeForm({ ...sizeForm, min_height: Number(e.target.value) })
-                  }
-                />
-              </label>
-
-              <label>
-                Chiều cao tối đa (cm)
-                <input
-                  type="number"
-                  required
-                  value={sizeForm.max_height}
-                  onChange={(e) =>
-                    setSizeForm({ ...sizeForm, max_height: Number(e.target.value) })
-                  }
-                />
-              </label>
-
-              <label>
-                Cân nặng tối thiểu (kg)
-                <input
-                  type="number"
-                  required
-                  value={sizeForm.min_weight}
-                  onChange={(e) =>
-                    setSizeForm({ ...sizeForm, min_weight: Number(e.target.value) })
-                  }
-                />
-              </label>
-
-              <label>
-                Cân nặng tối đa (kg)
-                <input
-                  type="number"
-                  required
-                  value={sizeForm.max_weight}
-                  onChange={(e) =>
-                    setSizeForm({ ...sizeForm, max_weight: Number(e.target.value) })
-                  }
-                />
+                <input required maxLength={32} value={sizeForm.size} onChange={(event) => setSizeForm({ ...sizeForm, size: event.target.value })} />
               </label>
 
               <label>
@@ -533,6 +502,30 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
                   <option value="Oversize">Rộng rãi thoải mái (Oversize)</option>
                 </select>
               </label>
+              <details className="wide" open>
+                <summary>Số đo cơ thể</summary>
+                <div className="admin-form">
+                  {bodyKeys.flatMap((key) => (["min", "max"] as const).map((bound) => {
+                    const field = `${bound}_${key}` as const;
+                    const spec = measurements[key];
+                    return <label key={field}>{spec.label} {bound === "min" ? "tối thiểu" : "tối đa"} ({spec.unit})
+                      <input type="number" min={spec.min} max={spec.max} step="any" value={sizeForm[field] ?? ""}
+                        onChange={(event) => setSizeForm({ ...sizeForm, [field]: event.target.value ? Number(event.target.value) : undefined })} />
+                    </label>;
+                  }))}
+                </div>
+              </details>
+              <details className="wide">
+                <summary>Số đo thành phẩm (cm)</summary>
+                <div className="admin-form">
+                  {garmentKeys.map((key) => <label key={key}>{garmentMeasurements[key]}
+                    <input type="number" min="0.01" max="300" step="any" value={sizeForm.garment?.[key] ?? ""}
+                      onChange={(event) => setSizeForm({ ...sizeForm, garment: {
+                        ...sizeForm.garment, [key]: event.target.value ? Number(event.target.value) : undefined,
+                      } })} />
+                  </label>)}
+                </div>
+              </details>
 
               <div className="admin-actions wide">
                 <button type="submit" className="admin-button" disabled={busy}>
@@ -547,7 +540,7 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
             <div className="admin-panel-heading">
               <div>
                 <h2>Bảng quy tắc size đang cấu hình</h2>
-                <p>Khớp dữ liệu nhân trắc học theo từng danh mục thời trang.</p>
+                <p>Quy tắc theo từng sản phẩm hoặc danh mục.</p>
               </div>
               <span>{sizeRules.length} quy tắc</span>
             </div>
@@ -556,7 +549,7 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
               <table className="admin-table">
                 <thead>
                   <tr>
-                    <th>Danh mục</th>
+                    <th>Áp dụng cho</th>
                     <th style={{ textAlign: "center" }}>Size</th>
                     <th>Khoảng chiều cao</th>
                     <th>Khoảng cân nặng</th>
@@ -575,25 +568,26 @@ export default function AdminOutfits({ request, paginatedRequest, isAdmin }: { r
                     sizeRules.map((r) => (
                       <tr key={r._id}>
                         <td>
-                          <strong>{r.category_id?.name ?? "Danh mục"}</strong>
+                          <strong>{r.product_id?.name ?? r.category_id?.name ?? "Đã xóa khỏi danh mục"}</strong>
                         </td>
                         <td style={{ textAlign: "center" }}>
                           <span className="spec-chip">{r.size}</span>
                         </td>
                         <td>
-                          {r.min_height}cm – {r.max_height}cm
+                          {r.min_height !== undefined && r.max_height !== undefined ? `${r.min_height}–${r.max_height} cm` : "—"}
                         </td>
                         <td>
-                          {r.min_weight}kg – {r.max_weight}kg
+                          {r.min_weight !== undefined && r.max_weight !== undefined ? `${r.min_weight}–${r.max_weight} kg` : "—"}
                         </td>
                         <td>
                           <span className="form-type-chip">{r.fit_type}</span>
                         </td>
                         <td style={{ textAlign: "right" }}>
                           <button type="button" disabled={busy} onClick={() => {
-                            const { category_id, _id, ...rule } = r;
+                            const { category_id, product_id, scope, _id, ...rule } = r;
                             setEditingSizeId(_id);
-                            setSizeForm({ ...rule, category_id: category_id?._id ?? "" });
+                            setSizeScope(scope === "product" ? "product" : "category");
+                            setSizeForm({ ...rule, category_id: category_id?._id ?? "", product_id: product_id?._id ?? "" });
                           }}>Sửa</button>
                           <button
                             type="button"

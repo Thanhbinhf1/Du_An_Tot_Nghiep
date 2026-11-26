@@ -13,6 +13,7 @@ const reviewReportSchema = new Schema(
     comment: { type: String, required: true },
     rating: { type: Number, required: true },
     dismissed_at: { type: Date, default: null },
+    resolution: { type: String, enum: ["dismissed", "masked"], default: "dismissed" },
     dismissed_by: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true },

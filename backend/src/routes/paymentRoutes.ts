@@ -22,6 +22,9 @@ router.get("/methods", (_req, res) => {
 
 // MoMo
 router.post("/momo/create", PaymentController.createMoMoPayment);
+const retiredProvider = (_req: unknown, res: import("express").Response) => {
+  res.status(410).json({ status: "error", message: "Phương thức thanh toán này đã ngừng tạo giao dịch mới. Vui lòng chọn SePay khi đặt đơn mới." });
+};
 router.post("/sepay/create", SePayController.create);
 router.post("/sepay/orders/:orderId/reconcile", SePayController.reconcile);
 
@@ -33,7 +36,7 @@ router.patch("/:id/confirm", PaymentController.confirmBankTransfer);
 router.get("/order/:orderId", PaymentController.getPaymentByOrder);
 
 // VNPay
-router.post("/vnpay/create", PaymentController.createVNPayPayment);
+router.post("/vnpay/create", retiredProvider);
 router.post("/vnpay/:id/reconcile", PaymentController.reconcileVNPayPayment);
 router.post(
   "/vnpay/:id/resolve-failure",

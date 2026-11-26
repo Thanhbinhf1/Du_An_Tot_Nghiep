@@ -32,6 +32,7 @@ export async function addCartItem(
   productVariantId: string,
   quantity: number,
   token: string,
+  outfit?: { id: string; productId: string },
 ): Promise<CartItem> {
   if (!token) {
     throw new Error("Vui lòng đăng nhập trước khi thêm vào giỏ hàng.");
@@ -50,12 +51,13 @@ export async function addCartItem(
     body: JSON.stringify({
       product_variant_id: productVariantId,
       quantity,
+      ...(outfit ? { source_outfit_id: outfit.id, product_id: outfit.productId } : {}),
     }),
   });
 
   const item = await readApiResponse<CartItem>(response);
   notifyCartChanged();
-  notifyCartToast(`Đã thêm ${quantity} sản phẩm vào giỏ hàng!`, quantity);
+  if (!outfit) notifyCartToast(`Đã thêm ${quantity} sản phẩm vào giỏ hàng!`, quantity);
   return item;
 }
 
@@ -111,10 +113,11 @@ export interface BackendCart {
 }
 
 // GET /api/cart
-export async function getBackendCart(token: string): Promise<BackendCart> {
+export async function getBackendCart(token: string, signal?: AbortSignal): Promise<BackendCart> {
   const response = await fetch(`${API_BASE_URL}/cart`, {
     headers: authenticatedHeaders(token),
     cache: "no-store",
+    signal,
   });
 
   return readApiResponse<BackendCart>(response);

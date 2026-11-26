@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useState } from "react";
 import { resolveProductImage, type ApiCategory } from "@/lib/api";
 
 const categoryPhotos = new Map([
@@ -13,6 +16,24 @@ const categoryPhotos = new Map([
   ["em-be", "categories/embe3.webp"],
 ]);
 
+function CategoryImage({ photos }: { photos: string[] }) {
+  const [failedImages, setFailedImages] = useState<string[]>([]);
+  const photo = photos.find((url) => !failedImages.includes(url));
+  return (
+    <span className="store-category-image">
+      {photo ? (
+        // eslint-disable-next-line @next/next/no-img-element -- publishers can supply external URLs
+        <img src={photo} alt="" loading="lazy" width={128} height={128}
+          onError={() => setFailedImages((failed) => [...failed, photo])} />
+      ) : (
+        <svg viewBox="0 0 48 48" width={38} height={38} fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M20 15a4 4 0 1 1 6 3.5c-1.4.9-2 1.5-2 3.5m0 0L6 33a1 1 0 0 0 .5 2h35a1 1 0 0 0 .5-2L24 22Z" strokeWidth={1.5} />
+        </svg>
+      )}
+    </span>
+  );
+}
+
 export default function CategoryTiles({ categories, audience, onNavigate, photos }: {
   categories: ApiCategory[];
   audience?: string;
@@ -23,23 +44,17 @@ export default function CategoryTiles({ categories, audience, onNavigate, photos
     <div className="store-category-tiles">
       {categories.map((category) => {
         const fallback = categoryPhotos.get(category.slug);
-        const photo = category.image ? resolveProductImage(category.image)
-          : fallback ? `/images/${fallback}`
-            : category.thumbnail ? resolveProductImage(category.thumbnail) : photos?.get(category._id) ?? "";
+        const photoOptions = [
+          category.image && resolveProductImage(category.image),
+          category.thumbnail && resolveProductImage(category.thumbnail),
+          photos?.get(category._id),
+          fallback && `/images/${fallback}`,
+        ].filter((url): url is string => Boolean(url));
         return (
           <Link key={category._id} className="store-category-tile"
             href={`/categories/${encodeURIComponent(category.slug)}${audience ? `?nhom=${encodeURIComponent(audience)}` : ""}`}
             onClick={onNavigate}>
-            <span className="store-category-image">
-              {photo ? (
-                // eslint-disable-next-line @next/next/no-img-element -- publishers can supply external image URLs
-                <img src={photo} alt="" loading="lazy" width={128} height={128} />
-              ) : (
-                <svg viewBox="0 0 48 48" width={38} height={38} fill="none" stroke="currentColor" aria-hidden="true">
-                  <path d="M20 15a4 4 0 1 1 6 3.5c-1.4.9-2 1.5-2 3.5m0 0L6 33a1 1 0 0 0 .5 2h35a1 1 0 0 0 .5-2L24 22Z" strokeWidth={1.5} />
-                </svg>
-              )}
-            </span>
+            <CategoryImage photos={photoOptions} />
             <span>{category.name}</span>
           </Link>
         );

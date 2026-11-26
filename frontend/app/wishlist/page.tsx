@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import ProductCard from "@/components/product/ProductCard";
+import { AccountSidebar } from "@/components/account/AccountLayout";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 import { useWishlist } from "@/lib/wishlist";
 import { useDemoAuth } from "@/lib/demo-auth";
@@ -13,16 +14,9 @@ export default function WishlistPage() {
   const savedProducts = products.filter((product) => ids.includes(product.id));
 
   return (
-    <div className="container">
+    <div className="container wishlist-page">
       <div className="account-page-layout">
-        <aside className="account-menu">
-          <h3>Tài khoản</h3>
-          <Link href="/profile">Hồ sơ</Link>
-          <Link href="/profile/address">Sổ địa chỉ</Link>
-          <Link href="/profile/password">Đổi mật khẩu</Link>
-          <Link href="/orders">Đơn hàng của tôi</Link>
-          <Link className="active" href="/wishlist">Yêu thích</Link>
-        </aside>
+        <AccountSidebar active="wishlist" />
         <section className="account-page-content">
           <div className="catalog-heading"><div><div className="breadcrumb"><Link href="/">Trang chủ</Link> / Tài khoản</div><h1>Sản phẩm yêu thích</h1><p>{savedProducts.length} sản phẩm đã lưu</p></div><Link className="pill-button" href="/products">Khám phá sản phẩm</Link></div>
           {isHydrated && !token && <p><Link href="/dang-nhap">Đăng nhập</Link> để lưu yêu thích trên nhiều thiết bị.</p>}

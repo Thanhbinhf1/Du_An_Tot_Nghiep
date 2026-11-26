@@ -25,4 +25,6 @@ export type Product = {
   createdAt?: string;
   variants?: ProductVariant[];
   description?: string;
+  material?: string;
+  careInstructions?: string;
 };

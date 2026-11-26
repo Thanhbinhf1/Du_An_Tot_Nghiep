@@ -1,4 +1,5 @@
 import type { Response, NextFunction } from "express";
+import { createHash } from "node:crypto";
 import mongoose from "mongoose";
 import type { IOrder } from "../models/orderModel.js";
 import Order from "../models/orderModel.js";
@@ -6,31 +7,95 @@ import OrderDetail, { type IOrderDetail } from "../models/orderDetailModel.js";
 import Address from "../models/addressModel.js";
 import Cart from "../models/cartModel.js";
 import CartDetail from "../models/cartDetailModel.js";
-import Coupon from "../models/couponModel.js";
 import ProductVariant from "../models/productVariantModel.js";
 import Product from "../models/productModel.js";
 import OrderStatusHistory from "../models/orderStatusHistoryModel.js";
 import { AppError } from "../middlewares/AppError.js";
 import type { AuthRequest } from "../middlewares/authMiddleware.js";
-import { isPaymentMethodConfigured } from "../config/paymentMethods.js";
-import { calculateCheckoutPrice, readCheckoutOptions, restoreCouponUse } from "../services/checkoutPricing.js";
+import { checkoutPaymentMethodIssue, configuredPaymentMethods, isPaymentMethodConfigured, isSupportedPaymentMethod } from "../config/paymentMethods.js";
+import { calculateCheckoutPrice, checkoutDestination, checkoutSnapshot, readCheckoutOptions, reserveCouponUse, restoreCouponUse, type CheckoutSnapshotLine } from "../services/checkoutPricing.js";
+import { restoreOrderStock } from "../services/orderStock.js";
+
+const customerCancelState = { order_status: "pending", payment_method: "COD", payment_status: "pending" } as const;
+const customerCancelNote = "Khách hàng hủy đơn COD: ";
+
+function canCustomerCancel(order: Pick<IOrder, "order_status" | "payment_status" | "payment_method">) {
+  return order.order_status === customerCancelState.order_status &&
+    order.payment_method === customerCancelState.payment_method && order.payment_status === customerCancelState.payment_status;
+}
+
+function customerOrderActions(order: Pick<IOrder, "order_status" | "payment_status" | "payment_method" | "final_amount">) {
+  return {
+    cancel: canCustomerCancel(order),
+    pay: order.order_status === "pending" && order.payment_status === "pending" && order.payment_method !== "COD" &&
+      isSupportedPaymentMethod(order.payment_method) && isPaymentMethodConfigured(order.payment_method) &&
+      !checkoutPaymentMethodIssue(order.payment_method, order.final_amount),
+  };
+}
 
 export class OrderController {
   static async quoteCheckout(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw new AppError("Bạn chưa đăng nhập.", 401);
       const options = readCheckoutOptions(req.body ?? {});
+      const addressId: unknown = req.body?.address_id;
+      let destination: ReturnType<typeof checkoutDestination> | null = null;
+      if (addressId !== undefined) {
+        if (typeof addressId !== "string" || !mongoose.isValidObjectId(addressId)) {
+          throw new AppError("ID địa chỉ không hợp lệ", 400);
+        }
+        const address = await Address.findOne({ _id: addressId, user_id: req.user._id }).session(null);
+        if (!address) throw new AppError("Không tìm thấy địa chỉ giao hàng", 404);
+        destination = checkoutDestination(address);
+      }
       const cart = await Cart.findOne({ user_id: req.user._id }).select("_id").lean();
       const items = cart ? await CartDetail.find({ cart_id: cart._id })
-        .populate<{ product_variant_id: Pick<InstanceType<typeof ProductVariant>, "price" | "sale_price"> | null }>(
-          "product_variant_id", "price sale_price",
+        .populate<{ product_variant_id: Pick<InstanceType<typeof ProductVariant>, "_id" | "product_id" | "sku" | "size" | "color" | "price" | "sale_price" | "status" | "stock_quantity"> | null }>(
+          "product_variant_id", "product_id sku size color price sale_price status stock_quantity",
         ).lean() : [];
-      const subtotal = items.reduce((sum, item) => {
+      const productIds = [...new Set(items.map(({ product_variant_id }) => product_variant_id?.product_id).filter(Boolean).map(String))];
+      const activeProducts = productIds.length ? await Product.find({ _id: { $in: productIds }, status: true }).select("_id").lean() : [];
+      const sellable = new Set(activeProducts.map(({ _id }) => String(_id)));
+      const quotedQuantities = new Map<string, number>();
+      const rows: CheckoutSnapshotLine[] = items.map((item) => {
         const variant = item.product_variant_id;
-        return sum + (variant ? (variant.sale_price ?? variant.price) * item.quantity : 0);
-      }, 0);
-      const { couponId: _couponId, ...price } = await calculateCheckoutPrice(subtotal, options);
-      res.json({ status: "success", data: price });
+        if (!variant?.status || !sellable.has(String(variant.product_id)) || item.outfit_id != null) {
+          throw new AppError("Có dòng sản phẩm không còn đặt được. Vui lòng cập nhật giỏ hàng.", 409);
+        }
+        const unitPrice = variant.sale_price ?? variant.price;
+        if (!Number.isSafeInteger(unitPrice) || unitPrice < 0 || !Number.isSafeInteger(item.quantity) || item.quantity < 1) {
+          throw new AppError("Giá hoặc số lượng trong giỏ hàng không hợp lệ.", 400);
+        }
+        const variantId = String(variant._id);
+        const quantity = (quotedQuantities.get(variantId) ?? 0) + item.quantity;
+        if (!Number.isSafeInteger(quantity) || !Number.isSafeInteger(variant.stock_quantity) || variant.stock_quantity < quantity) {
+          throw new AppError("Sản phẩm không đủ tồn kho. Vui lòng cập nhật giỏ hàng.", 409);
+        }
+        quotedQuantities.set(variantId, quantity);
+        return {
+          id: String(item._id),
+          variant_id: variantId,
+          sku: variant.sku,
+          size: variant.size,
+          color: variant.color,
+          quantity: item.quantity,
+          unit_price: unitPrice,
+        };
+      });
+      const subtotal = rows.reduce((sum, line) => sum + line.unit_price * line.quantity, 0);
+      if (!Number.isSafeInteger(subtotal)) throw new AppError("Tổng tiền không hợp lệ.", 400);
+      const pricing = await calculateCheckoutPrice(subtotal, { ...options, location: destination });
+      const { couponId: _couponId, ...price } = pricing;
+      const configured = configuredPaymentMethods();
+      res.json({
+        status: "success",
+        data: {
+          ...price, address: destination, cart_lines: rows,
+          configured_payment_methods: configured,
+          payment_methods: configured.filter((method) => !checkoutPaymentMethodIssue(method, price.final_amount)),
+          cart_snapshot: checkoutSnapshot(rows, options.method, pricing, destination),
+        },
+      });
     } catch (error) {
       next(error);
     }
@@ -56,7 +121,7 @@ export class OrderController {
       return res.status(200).json({
         status: "success",
         results: orders.length,
-        data: orders,
+        data: orders.map((order) => ({ ...order, actions: customerOrderActions(order) })),
       });
     } catch (error) {
       next(error);
@@ -98,10 +163,16 @@ export class OrderController {
         ? await OrderController.addReviewProducts(items)
         : items;
 
+      const cancellation = order.order_status === "cancelled" ? await OrderStatusHistory.findOne({
+        order_id: order._id, status: "cancelled", changed_by: req.user._id, note: { $regex: `^${customerCancelNote}` },
+      }).select("note").lean() : null;
+
       return res.status(200).json({
         status: "success",
         data: {
           ...order,
+          actions: customerOrderActions(order),
+          cancellation_reason: cancellation?.note.slice(customerCancelNote.length) ?? null,
           items: orderItems,
         },
       });
@@ -142,10 +213,14 @@ export class OrderController {
       }
 
       const userId = req.user._id;
-      const { address_id, payment_method, note, expected_total } = req.body ?? {};
+      const { address_id, payment_method, note, expected_total, expected_cart_snapshot } = req.body ?? {};
       const options = readCheckoutOptions(req.body ?? {});
       if (expected_total !== undefined && (!Number.isSafeInteger(expected_total) || expected_total < 0)) {
         throw new AppError("Tổng tiền xác nhận không hợp lệ.", 400);
+      }
+      if (expected_cart_snapshot !== undefined &&
+          (typeof expected_cart_snapshot !== "string" || !/^[a-f0-9]{64}$/.test(expected_cart_snapshot))) {
+        throw new AppError("Mã đối chiếu giỏ hàng không hợp lệ.", 400);
       }
 
       if (
@@ -155,17 +230,8 @@ export class OrderController {
         throw new AppError("ID địa chỉ không hợp lệ", 400);
       }
 
-      if (
-        payment_method !== "COD" &&
-        payment_method !== "BankTransfer" &&
-        payment_method !== "SePay" &&
-        payment_method !== "MoMo"
-      ) {
+      if (!isSupportedPaymentMethod(payment_method)) {
         throw new AppError("Phương thức thanh toán không hợp lệ", 400);
-      }
-
-      if (!isPaymentMethodConfigured(payment_method)) {
-        throw new AppError("Phương thức thanh toán chưa sẵn sàng.", 409);
       }
 
       if (
@@ -175,7 +241,37 @@ export class OrderController {
         throw new AppError("Ghi chú không hợp lệ", 400);
       }
 
-      const result = await mongoose.connection.transaction(async (session) => {
+      const requestHash = expected_cart_snapshot === undefined ? undefined :
+        createHash("sha256").update(JSON.stringify([
+          address_id.toLowerCase(), payment_method, note?.trim() ?? "",
+          options.method, options.code, expected_total ?? null,
+        ])).digest("hex");
+
+      const { data, replayed } = await mongoose.connection.transaction(async (session) => {
+        if (requestHash) {
+          const existing = await Order.findOne({
+            user_id: userId,
+            checkout_snapshot: expected_cart_snapshot,
+          }).session(session);
+          if (existing) {
+            if (existing.checkout_request_hash !== requestHash) {
+              throw new AppError("Báo giá đã được dùng để đặt đơn với thông tin khác.", 409);
+            }
+            return { replayed: true, data: {
+              order_id: existing._id,
+              total_amount: existing.final_amount,
+              total_items: existing.checkout_item_count,
+              payment_method: existing.payment_method,
+              payment_status: existing.payment_status,
+              order_status: existing.order_status,
+            } };
+          }
+        }
+
+        if (!isPaymentMethodConfigured(payment_method)) {
+          throw new AppError("Phương thức thanh toán chưa sẵn sàng.", 409);
+        }
+
         // 1. Kiểm tra địa chỉ của chính người mua
         const address = await Address.findOne({
           _id: address_id,
@@ -216,6 +312,7 @@ export class OrderController {
         }> = [];
 
         const stockNeeded = new Map<string, number>();
+        const quoteRows: CheckoutSnapshotLine[] = [];
         let totalAmount = 0;
 
         // 3. Kiểm tra từng sản phẩm trong giỏ
@@ -255,10 +352,12 @@ export class OrderController {
 
           const variantId = String(variant._id);
 
-          stockNeeded.set(
-            variantId,
-            (stockNeeded.get(variantId) ?? 0) + item.quantity,
-          );
+          const requiredStock = (stockNeeded.get(variantId) ?? 0) + item.quantity;
+          if (!Number.isSafeInteger(requiredStock)) throw new AppError("Số lượng sản phẩm không hợp lệ", 400);
+          if (!Number.isSafeInteger(variant.stock_quantity) || variant.stock_quantity < requiredStock) {
+            throw new AppError("Sản phẩm không đủ tồn kho", 409);
+          }
+          stockNeeded.set(variantId, requiredStock);
 
           totalAmount += price * item.quantity;
 
@@ -277,24 +376,31 @@ export class OrderController {
             quantity: item.quantity,
             price_at_buy: price,
           });
+          if (expected_cart_snapshot !== undefined) {
+            quoteRows.push({
+              id: String(item._id),
+              variant_id: variantId,
+              sku: variant.sku,
+              size: variant.size,
+              color: variant.color,
+              quantity: item.quantity,
+              unit_price: price,
+            });
+          }
         }
 
-        const price = await calculateCheckoutPrice(totalAmount, options, session);
+        const destination = checkoutDestination(address);
+        const price = await calculateCheckoutPrice(totalAmount, { ...options, location: destination }, session);
         if (expected_total !== undefined && price.final_amount !== expected_total) {
           throw new AppError("Tổng tiền đã thay đổi. Vui lòng kiểm tra lại trước khi đặt đơn.", 409);
         }
-        if (price.final_amount === 0 && payment_method !== "COD") {
-          throw new AppError("Vui lòng chọn COD cho đơn hàng có tổng tiền bằng 0.", 400);
+        if (expected_cart_snapshot !== undefined &&
+            checkoutSnapshot(quoteRows, options.method, price, destination) !== expected_cart_snapshot) {
+          throw new AppError("Giỏ hàng đã thay đổi hoặc địa chỉ giao hàng cần được xác nhận lại. Vui lòng kiểm tra trước khi đặt đơn.", 409);
         }
-        if (payment_method === "MoMo" && (price.final_amount < 1_000 || price.final_amount > 50_000_000)) {
-          throw new AppError("MoMo không hỗ trợ tổng tiền đơn hàng này.", 400);
-        }
-        if (payment_method === "SePay" && !Number.isSafeInteger(price.final_amount)) {
-          throw new AppError("SePay yêu cầu tổng tiền là số nguyên VNĐ.", 400);
-        }
-        if (price.couponId) {
-          await Coupon.updateOne({ _id: price.couponId }, { $inc: { used_count: 1 } }, { session });
-        }
+        const paymentIssue = checkoutPaymentMethodIssue(payment_method, price.final_amount);
+        if (paymentIssue) throw new AppError(paymentIssue, 400);
+        await reserveCouponUse(price.couponId, session);
 
         // 4. Trừ tồn kho có điều kiện
         // Cộng số lượng các dòng cùng biến thể trước khi trừ.
@@ -305,7 +411,7 @@ export class OrderController {
               status: true,
               stock_quantity: { $gte: quantity },
             },
-            { $inc: { stock_quantity: -quantity } },
+            { $inc: { stock_quantity: -quantity, __v: 1 } },
             {
               session,
               returnDocument: "after",
@@ -325,8 +431,15 @@ export class OrderController {
           address.province,
         ].filter(Boolean).join(", ");
 
+        const totalItems = orderItems.reduce((sum, item) => sum + item.quantity, 0);
+        if (!Number.isSafeInteger(totalItems)) throw new AppError("Tổng số lượng sản phẩm không hợp lệ", 400);
         const order = new Order({
           user_id: userId,
+          ...(requestHash && {
+            checkout_snapshot: expected_cart_snapshot,
+            checkout_request_hash: requestHash,
+            checkout_item_count: totalItems,
+          }),
           coupon_id: price.couponId,
           total_product_amount: price.total_product_amount,
           discount_amount: price.discount_amount,
@@ -366,23 +479,27 @@ export class OrderController {
           throw new AppError("Giỏ hàng đã thay đổi, vui lòng thử lại", 409);
         }
 
-        return {
+        await OrderStatusHistory.create([{
+          order_id: order._id, status: "pending", note: "Khách hàng đặt đơn", changed_by: userId,
+        }], { session });
+
+        return { replayed: false, data: {
           order_id: order._id,
           total_amount: price.final_amount,
-          total_items: orderItems.reduce((sum, item) => sum + item.quantity, 0),
+          total_items: totalItems,
           payment_method,
           payment_status: "pending",
           order_status: "pending",
-        };
+        } };
       });
 
-      return res.status(201).json({
+      return res.status(replayed ? 200 : 201).json({
         status: "success",
         message:
-          payment_method === "COD"
+          replayed ? "Đơn hàng đã được ghi nhận" : payment_method === "COD"
             ? "Đặt hàng COD thành công"
             : "Tạo đơn hàng thành công, đang chờ thanh toán",
-        data: result,
+        data,
       });
     } catch (error) {
       next(error);
@@ -408,6 +525,11 @@ export class OrderController {
         throw new AppError("ID đơn hàng không hợp lệ", 400);
       }
 
+      const reason = req.body?.reason;
+      if (typeof reason !== "string" || !reason.trim() || reason.length > 500) {
+        throw new AppError("Vui lòng nhập lý do hủy đơn hàng (tối đa 500 ký tự).", 400);
+      }
+
       const result = await mongoose.connection.transaction(async (session) => {
         // 1. Kiểm tra đơn hàng thuộc người đăng nhập
         const existingOrder = await Order.findOne({
@@ -419,19 +541,8 @@ export class OrderController {
           throw new AppError("Không tìm thấy đơn hàng", 404);
         }
 
-        // Chỉ hỗ trợ hủy đơn COD chưa thanh toán
-        if (
-          existingOrder.payment_method !== "COD" ||
-          existingOrder.payment_status !== "pending"
-        ) {
-          throw new AppError(
-            "Đơn hàng này cần xử lý hủy hoặc hoàn tiền riêng",
-            409,
-          );
-        }
-
-        if (existingOrder.order_status !== "pending") {
-          throw new AppError("Chỉ có thể hủy đơn hàng đang chờ xử lý", 409);
+        if (!canCustomerCancel(existingOrder)) {
+          throw new AppError("Khách hàng chỉ có thể hủy đơn COD chưa thu tiền đang chờ xác nhận.", 409);
         }
 
         // 2. Lấy các sản phẩm thuộc đơn hàng
@@ -451,9 +562,7 @@ export class OrderController {
           {
             _id: existingOrder._id,
             user_id: userId,
-            order_status: "pending",
-            payment_method: "COD",
-            payment_status: "pending",
+            ...customerCancelState,
           },
           {
             $set: { order_status: "cancelled" },
@@ -469,40 +578,7 @@ export class OrderController {
           throw new AppError("Trạng thái đơn hàng đã thay đổi", 409);
         }
 
-        // 4. Gộp số lượng theo từng biến thể
-        const quantities = new Map<string, number>();
-
-        for (const item of items) {
-          if (!Number.isSafeInteger(item.quantity) || item.quantity < 1) {
-            throw new AppError("Số lượng trong đơn hàng không hợp lệ", 409);
-          }
-
-          if (!item.product_variant_id) {
-            if (item.storefront_product_id) continue;
-            throw new AppError("Không tìm thấy biến thể trong đơn hàng", 409);
-          }
-          const variantId = String(item.product_variant_id);
-          const total = (quantities.get(variantId) ?? 0) + item.quantity;
-
-          if (!Number.isSafeInteger(total)) {
-            throw new AppError("Tổng số lượng hoàn kho không hợp lệ", 409);
-          }
-
-          quantities.set(variantId, total);
-        }
-
-        // 5. Hoàn lại tồn kho
-        for (const [variantId, quantity] of quantities) {
-          const result = await ProductVariant.updateOne(
-            { _id: variantId },
-            { $inc: { stock_quantity: quantity } },
-            { session, runValidators: true },
-          );
-
-          if (result.matchedCount !== 1) {
-            throw new AppError("Không tìm thấy biến thể để hoàn kho", 409);
-          }
-        }
+        await restoreOrderStock(items, session);
 
         await restoreCouponUse(updatedOrder.coupon_id, session);
 
@@ -512,7 +588,7 @@ export class OrderController {
             {
               order_id: updatedOrder._id,
               status: "cancelled",
-              note: "Khách hàng yêu cầu hủy đơn COD",
+              note: customerCancelNote + reason.trim(),
               changed_by: userId,
             },
           ],
@@ -565,6 +641,9 @@ export class OrderController {
         "pending",
         "processing",
         "shipping",
+        "delivery_failed",
+        "returning",
+        "returned",
         "completed",
         "cancelled",
       ] as const;
@@ -679,6 +758,9 @@ export class OrderController {
           if (order.payment_method !== "COD" && order.payment_status !== "success") {
             throw new AppError("Cần xác nhận thanh toán trước khi xử lý đơn hàng.", 409);
           }
+          if (order.payment_method === "COD" && !["pending", "success"].includes(order.payment_status)) {
+            throw new AppError("Trạng thái thanh toán COD không cho phép hoàn tất đơn hàng.", 409);
+          }
 
           // Cập nhật có điều kiện để tránh ghi đè trạng thái.
           const updated = await Order.findOneAndUpdate(
@@ -687,7 +769,11 @@ export class OrderController {
               order_status: order.order_status,
             },
             {
-              $set: { order_status: status },
+              $set: {
+                order_status: status,
+                ...(status === "completed" ? { completed_at: new Date() } : {}),
+                ...(order.payment_method === "COD" && status === "completed" ? { payment_status: "success" } : {}),
+              },
             },
             {
               session,

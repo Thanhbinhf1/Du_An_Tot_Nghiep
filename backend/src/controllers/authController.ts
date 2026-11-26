@@ -3,8 +3,24 @@ import type { AuthRequest } from "../middlewares/authMiddleware.js";
 import { AuthService } from "../services/authService.js";
 import { AppError } from "../middlewares/AppError.js";
 import User from "../models/userModel.js";
+import { PasswordResetService } from "../services/passwordResetService.js";
 
 export class AuthController {
+  static async forgotPassword(req: Request, res: Response) {
+    const data = await PasswordResetService.request(req.body?.email, req.ip ?? "unknown");
+    res.status(202).json({ status: "success", data });
+  }
+
+  static async resetPassword(req: Request, res: Response) {
+    await PasswordResetService.reset({
+      email: req.body?.email,
+      requestId: req.body?.request_id,
+      code: req.body?.code,
+      newPassword: req.body?.newPassword,
+    }, req.ip ?? "unknown");
+    res.json({ status: "success", data: { updated: true } });
+  }
+
   static async changePassword(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw new AppError("Bạn chưa đăng nhập.", 401);
@@ -33,7 +49,7 @@ export class AuthController {
 
   static async login(req: Request, res: Response, next: NextFunction) {
     try {
-      const { email, password } = req.body;
+      const { email, password } = req.body ?? {};
       if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
         throw new AppError("Vui lòng cung cấp đầy đủ email và mật khẩu", 400);
       }
@@ -69,7 +85,14 @@ export class AuthController {
       if (typeof name !== "string" || !name.trim() || name.trim().length > 120) {
         throw new AppError("Họ và tên phải có từ 1 đến 120 ký tự.", 400);
       }
-      const updated = await User.findByIdAndUpdate(user._id, { $set: { name: name.trim() } }, {
+      const changes: { name: string; phone?: string } = { name: name.trim() };
+      if (req.body.phone !== undefined) {
+        if (typeof req.body.phone !== "string") throw new AppError("Số điện thoại không hợp lệ.", 400);
+        const phone = req.body.phone.trim().replace(/[ .-]/g, "").replace(/^\+?84/, "0");
+        if (phone && !/^0[35789]\d{8}$/.test(phone)) throw new AppError("Số điện thoại không hợp lệ.", 400);
+        changes.phone = phone;
+      }
+      const updated = await User.findByIdAndUpdate(user._id, { $set: changes }, {
         returnDocument: "after",
         runValidators: true,
       });

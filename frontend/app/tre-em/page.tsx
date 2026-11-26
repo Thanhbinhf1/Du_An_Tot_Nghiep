@@ -1,5 +1,5 @@
-import CategoryPage from "@/components/product/CategoryPage";
+import CategoryEntry from "@/components/product/CategoryEntry";
 
 export default function ChildrenPage() {
-  return <CategoryPage slug="tre-em" />;
+  return <CategoryEntry slug="tre-em" />;
 }

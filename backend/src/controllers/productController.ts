@@ -1,27 +1,50 @@
+import { legacyBundle, saveLegacyBundle } from "../services/catalogLegacyAdapter.js";
+import { AppError } from "../middlewares/AppError.js";
 import type { Request, Response, NextFunction } from "express";
 import mongoose from "mongoose";
 
 import Product from "../models/productModel.js";
-import Category from "../models/categoryModel.js";
-import Brand from "../models/brandModel.js";
+
+
 import ProductImage from "../models/productImageModel.js";
 import ProductVariant from "../models/productVariantModel.js";
 import ProductComment from "../models/productCommentModel.js";
-import { productGenders, productAudiences } from "../services/catalogAudience.js";
+import { productAudiences } from "../services/catalogAudience.js";
+import { literalSearch, readPagination } from "../services/listQuery.js";
 
 // GET /api/products/admin - Dữ liệu quản trị, gồm cả sản phẩm đã tắt.
 export const getAdminProducts = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
-    const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit) || 25)));
-    if (!Number.isSafeInteger(page) || !Number.isSafeInteger(limit)) {
-      return res.status(400).json({ message: "Phân trang không hợp lệ" });
-    }
-    const [products, total] = await Promise.all([
-      Product.find({}).sort({ created_at: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-      Product.countDocuments({}),
+    const { page, limit } = readPagination(req.query);
+    const search = literalSearch(req.query.search);
+    const scope: Record<string, unknown> = search ? { $or: [{ name: { $regex: search, $options: "i" } }, { product_code: { $regex: search, $options: "i" } }] } : {};
+    if (typeof req.query.category_id === "string" && mongoose.isObjectIdOrHexString(req.query.category_id)) scope.category_id = req.query.category_id;
+    if (typeof req.query.brand_id === "string" && mongoose.isObjectIdOrHexString(req.query.brand_id)) scope.brand_id = req.query.brand_id;
+    const states = { all: {}, published: { status: true }, draft: { publication_state: "draft" }, hidden: { status: false, publication_state: { $ne: "draft" } } } as const;
+    const state = typeof req.query.state === "string" && Object.hasOwn(states, req.query.state) ? req.query.state as keyof typeof states : "all";
+    const filter = { ...scope, ...states[state] };
+    const sort = req.query.sort === "name" ? { name: 1 as const, _id: 1 as const } : { created_at: -1 as const, _id: -1 as const };
+    const [products, statusCounts] = await Promise.all([
+      Product.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).lean(),
+      Promise.all(Object.entries(states).map(async ([key, criteria]) =>
+        [key, await Product.countDocuments({ ...scope, ...criteria })] as const)).then(Object.fromEntries),
     ]);
-    return res.status(200).json({ data: products, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+    const total = statusCounts[state];
+    const ids = products.map((product) => product._id);
+    const [images, variants] = await Promise.all([
+      ProductImage.find({ product_id: { $in: ids } }).sort({ is_primary: -1, display_order: 1 }).select("product_id image_url color").lean(),
+      ProductVariant.find({ product_id: { $in: ids } }).select("product_id price sale_price stock_quantity color size status").lean(),
+    ]);
+    return res.status(200).json({ data: products.map((product) => {
+      const rows = variants.filter((variant) => String(variant.product_id) === String(product._id));
+      const prices = rows.filter((row) => row.status).map((row) => row.sale_price ?? row.price);
+      return { ...product, image: images.find((image) => String(image.product_id) === String(product._id))?.image_url,
+        variant_count: rows.length, stock: rows.reduce((sum, row) => sum + row.stock_quantity, 0),
+        available_stock: rows.reduce((sum, row) => sum + (row.status ? row.stock_quantity : 0), 0),
+        colors: [...new Set(rows.map((row) => row.color))], sizes: [...new Set(rows.map((row) => row.size))],
+        min_price: prices.length ? Math.min(...prices) : null,
+        max_price: prices.length ? Math.max(...prices) : null };
+    }), pagination: { page, limit, total, totalPages: Math.ceil(total / limit), statusCounts } });
   } catch (error) { next(error); }
 };
 
@@ -32,8 +55,7 @@ export const getProducts = async (
   next: NextFunction,
 ) => {
   try {
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 10));
+    const { page, limit } = readPagination(req.query, 10);
 
     const filter: Record<string, unknown> = { status: true };
 
@@ -59,9 +81,10 @@ export const getProducts = async (
       filter.is_featured = true;
     }
 
-    if (typeof req.query.keyword === "string" && req.query.keyword.trim()) {
+    const keyword = literalSearch(req.query.keyword);
+    if (keyword) {
       filter.name = {
-        $regex: req.query.keyword.trim(),
+        $regex: keyword,
         $options: "i",
       };
     }
@@ -94,10 +117,13 @@ export const getProducts = async (
         ]),
       ]);
       const averageByProduct = new Map(ratings.map((rating) => [rating._id, rating.average]));
-      const primaryImages = new Map<string, (typeof images)[number]>();
+      const imagesByColor = new Map<string, Map<string, (typeof images)[number]>>();
       for (const image of images) {
         const id = String(image.product_id);
-        if (!primaryImages.has(id)) primaryImages.set(id, image);
+        const group = imagesByColor.get(id) ?? new Map<string, (typeof images)[number]>();
+        const color = image.color?.trim().toLocaleLowerCase("vi") ?? "";
+        if (!group.has(color)) group.set(color, image);
+        imagesByColor.set(id, group);
       }
       const variantsByProduct = new Map<string, typeof variants>();
       for (const variant of variants) {
@@ -109,11 +135,10 @@ export const getProducts = async (
       return res.json({
         data: products.map((product) => {
           const id = String(product._id);
-          const image = primaryImages.get(id);
           return {
             ...product,
             audiences: productAudiences(product.gender),
-            images: image ? [image] : [],
+            images: [...(imagesByColor.get(id)?.values() ?? [])],
             variants: variantsByProduct.get(id) ?? [],
             average_rating: averageByProduct.get(id) ?? 0,
           };
@@ -182,6 +207,7 @@ export const getProductById = async (
       message: "Lấy chi tiết sản phẩm thành công",
       data: {
         ...product,
+        audiences: productAudiences(product.gender),
         images,
         variants,
         average_rating: ratings[0]?.average ?? 0,
@@ -194,164 +220,25 @@ export const getProductById = async (
 };
 
 // POST /api/products - Thêm sản phẩm
-export const createProduct = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
+export const createProduct = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const {
-      category_id,
-      brand_id,
-      name,
-      slug,
-      description,
-      gender,
-      is_featured,
-      status,
-    } = req.body ?? {};
-    if (gender !== undefined && !productGenders.some((value) => value === gender)) {
-      return res.status(400).json({ message: "Nhóm khách hàng không hợp lệ." });
-    }
-
-    if (!category_id || !brand_id || typeof name !== "string" || !name.trim() || typeof slug !== "string" || !slug.trim()) {
-      return res.status(400).json({
-        message: "Vui lòng nhập category_id, brand_id, name và slug",
-      });
-    }
-
-    if (
-      !mongoose.isValidObjectId(category_id) ||
-      !mongoose.isValidObjectId(brand_id)
-    ) {
-      return res.status(400).json({
-        message: "category_id hoặc brand_id không hợp lệ",
-      });
-    }
-
-    const [category, brand] = await Promise.all([Category.exists({ _id: category_id }), Brand.exists({ _id: brand_id })]);
-    if (!category || !brand) {
-      return res.status(404).json({ message: "Danh mục hoặc thương hiệu không tồn tại" });
-    }
-
-    const normalizedSlug = slug.trim().toLowerCase();
-
-    const existingProduct = await Product.findOne({
-      slug: normalizedSlug,
-    });
-
-    if (existingProduct) {
-      return res.status(409).json({ message: "Slug sản phẩm đã tồn tại" });
-    }
-
-    const product = await Product.create({
-      category_id,
-      brand_id,
-      name: name.trim(),
-      slug: normalizedSlug,
-      description,
-      gender,
-      is_featured,
-      status,
-    });
-
-    return res.status(201).json({
-      message: "Thêm sản phẩm thành công",
-      data: product,
-    });
-  } catch (error) {
-    next(error);
-  }
+    if (req.body?.status === true) throw new AppError("Sản phẩm mới lưu nháp trước. Xuất bản tại workspace sau khi đủ dữ liệu.", 400);
+    const state = await saveLegacyBundle(req, undefined, { product: req.body, variants: [], images: [], action: "draft" });
+    res.status(201).json({ data: state.product });
+  } catch (error) { next(error); }
 };
-
-// PATCH /api/products/:id - Cập nhật sản phẩm
-export const updateProduct = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
+export const updateProduct = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id;
-
-    if (typeof id !== "string" || !mongoose.isValidObjectId(id)) {
-      return res.status(400).json({
-        message: "ID sản phẩm không hợp lệ",
-      });
-    }
-    const allowedFields = [
-      "category_id",
-      "brand_id",
-      "name",
-      "slug",
-      "description",
-      "gender",
-      "is_featured",
-      "status",
-    ];
-
-    const updates: Record<string, unknown> = {};
-
-    for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
-        updates[field] = req.body[field];
-      }
-    }
-    if (updates.gender !== undefined && !productGenders.some((value) => value === updates.gender)) {
-      return res.status(400).json({ message: "Nhóm khách hàng không hợp lệ." });
-    }
-
-    if (typeof updates.name === "string") {
-      updates.name = updates.name.trim();
-      if (!updates.name) {
-        return res
-          .status(400)
-          .json({ message: "Tên sản phẩm không được trống" });
-      }
-    }
-
-    if (typeof updates.slug === "string") {
-      updates.slug = updates.slug.trim().toLowerCase();
-      if (!updates.slug) {
-        return res.status(400).json({ message: "Slug không được trống" });
-      }
-    }
-
-    for (const field of ["category_id", "brand_id"] as const) {
-      if (
-        updates[field] !== undefined &&
-        (typeof updates[field] !== "string" ||
-          !mongoose.isValidObjectId(updates[field] as string))
-      ) {
-        return res.status(400).json({
-          message: `${field} không hợp lệ`,
-        });
-      }
-    }
-
-    const [category, brand] = await Promise.all([
-      updates.category_id === undefined || Category.exists({ _id: updates.category_id }),
-      updates.brand_id === undefined || Brand.exists({ _id: updates.brand_id }),
-    ]);
-    if (!category || !brand) {
-      return res.status(404).json({ message: "Danh mục hoặc thương hiệu không tồn tại" });
-    }
-
-    const product = await Product.findByIdAndUpdate(id, updates, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!product) {
-      return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
-    }
-
-    return res.status(200).json({
-      message: "Cập nhật sản phẩm thành công",
-      data: product,
-    });
-  } catch (error) {
-    next(error);
-  }
+    if (typeof id !== "string" || !mongoose.isObjectIdOrHexString(id)) throw new AppError("ID sản phẩm không hợp lệ", 400);
+    const bundle = await legacyBundle(id);
+    if (!Number.isSafeInteger(req.body?.expected_version)) throw new AppError("Cần expected_version từ sản phẩm đã đọc.", 400);
+    bundle.expected_version = req.body.expected_version;
+    bundle.product = { ...bundle.product, ...req.body };
+    bundle.action = req.body.status === true ? "publish" : req.body.status === false ? "hide" : "save";
+    const state = await saveLegacyBundle(req, id, bundle);
+    res.json({ data: state.product });
+  } catch (error) { next(error); }
 };
 
 // DELETE /api/products/:id - Xóa sản phẩm
@@ -369,19 +256,24 @@ export const deleteProduct = async (
       });
     }
 
-    const product = await Product.findByIdAndDelete(id);
-
+    const product = await mongoose.connection.transaction(async (session) => {
+      const product = await Product.findByIdAndUpdate(id, { $set: { status: false, publication_state: "hidden" }, $inc: { __v: 1 } }, {
+        session, returnDocument: "after", runValidators: true,
+      });
+      if (!product) return null;
+      await ProductVariant.updateMany(
+        { product_id: product._id },
+        { $set: { status: false }, $inc: { __v: 1 } },
+        { session, runValidators: true },
+      );
+      return product;
+    });
     if (!product) {
       return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
     }
 
-    await Promise.all([
-      ProductImage.deleteMany({ product_id: product._id }),
-      ProductVariant.deleteMany({ product_id: product._id }),
-    ]);
-
     return res.status(200).json({
-      message: "Xóa sản phẩm và dữ liệu ảnh, biến thể thành công",
+      message: "Đã ẩn sản phẩm và ngừng bán biến thể. Dữ liệu đơn hàng và ảnh được giữ lại.",
     });
   } catch (error) {
     next(error);

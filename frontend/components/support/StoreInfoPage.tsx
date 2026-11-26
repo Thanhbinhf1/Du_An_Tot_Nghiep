@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { API_BASE_URL, readApiResponse } from "@/lib/api";
 import { useDemoAuth } from "@/lib/demo-auth";
+import { useStoreInfo } from "@/lib/useStoreInfo";
 
 const content = {
   help: {
@@ -52,6 +53,19 @@ const content = {
   },
 };
 
+function SupportDirectory() {
+  const store = useStoreInfo();
+  return (
+    <aside className="support-directory" aria-label="Kênh hỗ trợ">
+      <h2>Chăm sóc khách hàng</h2>
+      {store?.hotline && <p><span>Điện thoại</span><a href={`tel:${store.hotline.replace(/[^\d+]/g, "")}`}>{store.hotline}</a></p>}
+      {store?.email && <p><span>Email</span><a href={`mailto:${store.email}`}>{store.email}</a></p>}
+      {store?.address && <p><span>Địa chỉ cửa hàng</span>{store.address}</p>}
+      <Link href="/help">Câu hỏi thường gặp</Link>
+    </aside>
+  );
+}
+
 export function StoreInfoPage({ page }: { page: keyof typeof content }) {
   const data = content[page];
   return (
@@ -64,7 +78,7 @@ export function StoreInfoPage({ page }: { page: keyof typeof content }) {
   );
 }
 
-export function ContactPage() {
+export function ContactPage({ initialTopic = "don-hang" }: { initialTopic?: string }) {
   const { isHydrated } = useDemoAuth();
   const [ticketId, setTicketId] = useState("");
   const [error, setError] = useState("");
@@ -94,15 +108,19 @@ export function ContactPage() {
     <section className="info-page">
       <div className="breadcrumb"><Link href="/">Trang chủ</Link> / Liên hệ</div>
       <h1>Liên hệ hỗ trợ</h1><p className="info-intro">Gửi câu hỏi cho nhóm chăm sóc khách hàng.</p>
+      <div className="support-contact-layout">
+      <SupportDirectory />
       <form className="settings-card contact-form" method="post" onSubmit={submit}>
         <label className="form-field">Họ và tên<input name="name" autoComplete="name" maxLength={120} required /></label>
         <label className="form-field">Email<input name="email" type="email" autoComplete="email" maxLength={254} required /></label>
-        <label className="form-field">Chủ đề<select name="topic" defaultValue="don-hang"><option value="don-hang">Đơn hàng</option><option value="san-pham">Sản phẩm</option><option value="doi-tra">Đổi trả</option><option value="khac">Khác</option></select></label>
+        <label className="form-field">Chủ đề<select name="topic" defaultValue={initialTopic}><option value="don-hang">Đơn hàng</option><option value="san-pham">Sản phẩm</option><option value="doi-tra">Đổi trả</option><option value="tai-khoan">Tài khoản</option><option value="khac">Khác</option></select></label>
+        {initialTopic === "tai-khoan" && <p className="small muted">Ghi email đã đăng ký trong nội dung yêu cầu để cửa hàng kiểm tra và hướng dẫn khôi phục tài khoản.</p>}
         <label className="form-field">Nội dung<textarea name="message" rows={5} maxLength={3000} required /></label>
         <button className="pill-button dark" type="submit" disabled={!isHydrated || sending}>{sending ? "Đang gửi..." : "Gửi yêu cầu"}</button>
         {error && <p role="alert" className="form-error">{error}</p>}
         {ticketId && <p role="status" className="settings-success">Đã gửi yêu cầu. Mã liên hệ {ticketId}.</p>}
       </form>
+      </div>
     </section>
   );
 }

@@ -1,9 +1,11 @@
 import { API_BASE_URL, authenticatedHeaders, readApiResponse } from "./api";
+import type { ShippingAddress } from "./address-api";
 
-export type PaymentMethod = "COD" | "BankTransfer" | "VNPay" | "MoMo" | "SePay";
+export type PaymentMethod = "COD" | "BankTransfer" | "PayOS" | "VNPay" | "MoMo" | "SePay";
 export type ShippingMethod = "Standard" | "Express";
 
 type CheckoutOptions = {
+  address_id?: string;
   shipping_method?: ShippingMethod;
   coupon_code?: string;
 };
@@ -15,7 +17,21 @@ export type CheckoutQuote = {
   final_amount: number;
   standard_shipping_fee: number;
   express_shipping_fee: number;
+  express_available: boolean;
+  address: Omit<ShippingAddress, "is_default"> | null;
+  payment_methods: PaymentMethod[];
+  configured_payment_methods: PaymentMethod[];
   free_shipping_threshold: number;
+  cart_lines: {
+    id: string;
+    variant_id: string;
+    sku: string;
+    size: string;
+    color: string;
+    quantity: number;
+    unit_price: number;
+  }[];
+  cart_snapshot: string;
 };
 
 export interface CreateOrderRequest extends CheckoutOptions {
@@ -23,6 +39,7 @@ export interface CreateOrderRequest extends CheckoutOptions {
   payment_method: PaymentMethod;
   note?: string;
   expected_total?: number;
+  expected_cart_snapshot: string;
 }
 
 export async function getCheckoutQuote(options: CheckoutOptions, token: string, signal?: AbortSignal) {
@@ -40,8 +57,8 @@ export interface CreateOrderResponse {
   total_amount: number;
   total_items: number;
   payment_method: PaymentMethod;
-  payment_status: "pending";
-  order_status: "pending";
+  payment_status: OrderPaymentStatus;
+  order_status: OrderStatus;
 }
 
 export async function createBackendOrder(
@@ -59,6 +76,7 @@ export async function createBackendOrder(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(data),
+    signal: AbortSignal.timeout(20_000),
   });
 
   return readApiResponse<CreateOrderResponse>(response);
@@ -70,6 +88,9 @@ export type OrderStatus =
   | "pending"
   | "processing"
   | "shipping"
+  | "delivery_failed"
+  | "returning"
+  | "returned"
   | "completed"
   | "cancelled";
 
@@ -88,6 +109,9 @@ export interface BackendOrder {
   receiver_phone: string;
   shipping_address: string;
   note?: string;
+  actions?: { cancel: boolean; pay: boolean };
+  cancellation_reason?: string | null;
+  refund?: { amount: number; at: string };
   created_at?: string;
   createdAt?: string;
 }
@@ -96,6 +120,9 @@ export const orderStatusText: Record<OrderStatus, string> = {
   pending: "Chờ xác nhận",
   processing: "Đang chuẩn bị",
   shipping: "Đang giao",
+  delivery_failed: "Giao thất bại · chờ xử lý",
+  returning: "Đang hoàn về shop",
+  returned: "Đã kiểm hàng hoàn",
   completed: "Hoàn thành",
   cancelled: "Đã hủy",
 };
@@ -110,8 +137,9 @@ export const paymentStatusText: Record<OrderPaymentStatus, string> = {
 export const paymentMethodText: Record<PaymentMethod, string> = {
   COD: "Thanh toán khi nhận hàng (COD)",
   BankTransfer: "Chuyển khoản ngân hàng",
-  VNPay: "VNPay",
-  SePay: "SePay",
+  PayOS: "payOS (giao dịch cũ)",
+  VNPay: "VNPay (giao dịch cũ)",
+  SePay: "SePay · QR ngân hàng",
   MoMo: "Ví MoMo",
 };
 
@@ -141,6 +169,7 @@ export async function getBackendOrder(id: string, token: string) {
 
 export async function getMyBackendOrders(
   token: string,
+  signal?: AbortSignal,
 ): Promise<BackendOrder[]> {
   if (!token) {
     throw new Error("Vui lòng đăng nhập.");
@@ -150,6 +179,7 @@ export async function getMyBackendOrders(
     method: "GET",
     headers: authenticatedHeaders(token),
     cache: "no-store",
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
   });
 
   return readApiResponse<BackendOrder[]>(response);
@@ -158,6 +188,7 @@ export async function getMyBackendOrders(
 export async function cancelBackendOrder(
   id: string,
   token: string,
+  reason: string,
 ): Promise<void> {
   if (!token) {
     throw new Error("Vui lòng đăng nhập.");
@@ -165,7 +196,9 @@ export async function cancelBackendOrder(
 
   const response = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(id)}/cancel`, {
     method: "PATCH",
-    headers: authenticatedHeaders(token),
+    headers: { ...authenticatedHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) {

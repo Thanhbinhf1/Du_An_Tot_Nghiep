@@ -1,10 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import type { AdminRequest } from "./ProductVariantsManager";
-import { paymentStatusText } from "@/lib/order-api";
+import type { AdminRequest, AdminPaginatedRequest } from "./ProductVariantsManager";
+import type { ApiPagination } from "@/lib/api";
+import AdminPagination, { adminListPath } from "./AdminPagination";
+import { queueLabels, navigate, type OrderQueue } from "./adminNavigation";
+import { paymentStatusText, paymentMethodText, type OrderStatus, type OrderPaymentStatus } from "@/lib/order-api";
 import type { OrderPaymentResponse } from "@/lib/payment-api";
 import OrderInvoiceModal, { type FullAdminOrder } from "./OrderInvoiceModal";
+import OrderReturnPanel from "./OrderReturnPanel";
+import AdminFeedback from "./AdminFeedback";
+import AdminIcon from "./AdminIcon";
 
 const nextOrderStatus = {
   pending: "processing",
@@ -16,15 +22,44 @@ const statusLabels: Record<string, string> = {
   pending: "Chờ xác nhận",
   processing: "Đang xử lý",
   shipping: "Đang giao",
+  delivery_failed: "Giao thất bại",
+  returning: "Đang hoàn về",
+  returned: "Đã kiểm hàng hoàn",
   completed: "Hoàn thành",
   cancelled: "Đã hủy",
 };
+const orderDate = new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Ho_Chi_Minh" });
+const shippingLabels: Record<string, string> = { Standard: "Tiêu chuẩn", Express: "Nhanh" };
 
-export default function AdminOrders({ request, isAdmin }: { request: AdminRequest; isAdmin: boolean }) {
+export type OrderListView = {
+  label: string;
+  empty: string;
+  description: string;
+  status?: OrderStatus;
+  paymentStatus?: OrderPaymentStatus;
+  queue?: OrderQueue;
+};
+
+type Props = {
+  queue?: OrderQueue;
+  view?: OrderListView;
+  initialSearch: string;
+  request: AdminRequest;
+  paginatedRequest: AdminPaginatedRequest;
+  isAdmin: boolean;
+};
+
+export default function AdminOrders({ request, paginatedRequest, isAdmin, queue, initialSearch, view }: Props) {
   const [orders, setOrders] = useState<FullAdminOrder[]>([]);
+  const [revision, setRevision] = useState(0);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [pagination, setPagination] = useState<ApiPagination>();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
-  const [search, setSearch] = useState("");
+  const [shippingFilter, setShippingFilter] = useState("all");
+  const [periodFilter, setPeriodFilter] = useState("all");
+  const [search, setSearch] = useState(initialSearch);
   const [selectedOrder, setSelectedOrder] = useState<FullAdminOrder | null>(null);
   const [invoiceOrder, setInvoiceOrder] = useState<FullAdminOrder | null>(null);
   const [cancelModalOrder, setCancelModalOrder] = useState<FullAdminOrder | null>(null);
@@ -32,32 +67,46 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [listError, setListError] = useState("");
   const [success, setSuccess] = useState("");
+  const activeQueue = view?.queue ?? queue;
+  const activeStatus = view?.status ?? statusFilter;
+  const activePaymentStatus = view?.paymentStatus ?? "";
 
   const formatPrice = (val: number) =>
     `${new Intl.NumberFormat("vi-VN").format(val)} đ`;
 
-  const fetchOrders = useCallback((signal?: AbortSignal) =>
-    request<FullAdminOrder[]>("/admin/orders", { signal })
-      .then((data) => {
+  const fetchOrders = useCallback((signal: AbortSignal) =>
+    paginatedRequest<FullAdminOrder[]>(adminListPath("/admin/orders", {
+      page, limit, queue: activeQueue ?? "", status: activeStatus, method: paymentFilter, payment_status: activePaymentStatus,
+      shipping: shippingFilter, period: periodFilter, search: search.trim().replace(/^#/, ""),
+    }), { signal })
+      .then(({ data, pagination }) => {
         if (signal?.aborted) return;
+        setListError("");
         setOrders(data);
+        setPagination(pagination);
+        if (!data.length && page > 1) setPage(page - 1);
         setSelectedOrder((current) => current ? data.find((order) => order._id === current._id) ?? null : null);
       })
       .catch((cause: unknown) => {
-        if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "Không thể tải danh sách đơn hàng.");
+        if (!signal?.aborted) setListError(cause instanceof Error ? cause.message : "Không thể tải danh sách đơn hàng.");
       })
       .finally(() => { if (!signal?.aborted) setLoading(false); }),
-  [request]);
+  [paginatedRequest, page, limit, activeStatus, activePaymentStatus, paymentFilter, shippingFilter, periodFilter, search, activeQueue]);
 
   useEffect(() => {
     const controller = new AbortController();
     void fetchOrders(controller.signal);
     return () => controller.abort();
-  }, [fetchOrders]);
+  }, [fetchOrders, revision]);
+
+  const refreshOrders = () => { setLoading(true); setRevision((value) => value + 1); };
 
   const updateOrderStatus = async (orderId: string, status: string) => {
     if (busy) return;
+    if (status === "completed" && orders.find((order) => order._id === orderId)?.payment_method === "COD" &&
+        !window.confirm("Xác nhận đơn đã giao thành công và đã thu đủ tiền COD?")) return;
     setBusy(true);
     setError("");
     setSuccess("");
@@ -67,7 +116,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
         body: JSON.stringify({ status }),
       });
       setSuccess(`Đã chuyển trạng thái đơn hàng sang "${statusLabels[status]}".`);
-      await fetchOrders();
+      refreshOrders();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Cập nhật trạng thái đơn hàng thất bại.");
     } finally {
@@ -75,7 +124,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
     }
   };
 
-  const handleCancelOrder = async (e: FormEvent) => {
+  const handleCancelOrder = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!cancelModalOrder || busy) return;
     setBusy(true);
@@ -84,12 +133,14 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
     try {
       await request(`/admin/orders/${cancelModalOrder._id}/cancel`, {
         method: "PATCH",
-        body: JSON.stringify({ note: cancelReason || "Quản trị viên hủy đơn hàng" }),
+        body: JSON.stringify({ note: cancelReason.trim(), acknowledge_refund: cancelModalOrder.payment_status === "success", legacy_link_closed: new FormData(e.currentTarget).has("legacy_link_closed") }),
       });
-      setSuccess("Đã hủy đơn hàng và hoàn lại số lượng tồn kho thành công.");
+      setSuccess(cancelModalOrder.payment_status === "success"
+        ? "Đã hủy đơn, hoàn kho và chuyển đơn sang danh sách chờ hoàn tiền."
+        : "Đã hủy đơn hàng và hoàn lại tồn kho.");
       setCancelModalOrder(null);
       setCancelReason("");
-      await fetchOrders();
+      refreshOrders();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Hủy đơn hàng thất bại.");
     } finally {
@@ -101,8 +152,10 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
     event.preventDefault();
     if (busy || !isAdmin) return;
     const formEl = event.currentTarget;
-    const transactionId = String(new FormData(formEl).get("transactionId") ?? "").trim();
-    if (!transactionId) return;
+    const form = new FormData(formEl);
+    const transactionId = String(form.get("transactionId") ?? "").trim();
+    const amount = Number(form.get("amount"));
+    if (!transactionId || !Number.isSafeInteger(amount) || amount <= 0) return;
 
     setBusy(true);
     setError("");
@@ -116,10 +169,10 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
 
       await request(`/payments/${payment._id}/confirm`, {
         method: "PATCH",
-        body: JSON.stringify({ transaction_id: transactionId }),
+        body: JSON.stringify({ transaction_id: transactionId, amount }),
       });
       setSuccess("Đã xác nhận thanh toán chuyển khoản thành công.");
-      await fetchOrders();
+      refreshOrders();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không thể xác nhận chuyển khoản.");
     } finally {
@@ -127,89 +180,57 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
     }
   };
 
-  const reconcileVNPay = async (orderId: string) => {
+  const reconcileSePay = async (orderId: string) => {
     if (busy || !isAdmin) return;
-    setBusy(true);
-    setError("");
-    setSuccess("");
+    setBusy(true); setError(""); setSuccess("");
     try {
-      const result = await request<OrderPaymentResponse>(`/payments/order/${orderId}`);
-      const payment = result.payments.find((item) => item.payment_method === "VNPay");
-      if (!payment) throw new Error("Đơn này chưa có yêu cầu thanh toán VNPay.");
-      const gateway = await request<{
-        gateway_response_code: string;
-        gateway_transaction_status: string;
-        database_updated: boolean;
-      }>(`/payments/vnpay/${payment._id}/reconcile`, {
-        method: "POST",
-        body: JSON.stringify({ apply: true }),
-      });
-      setSuccess(
-        `VNPay phản hồi mã ${gateway.gateway_response_code}, trạng thái ${gateway.gateway_transaction_status}.${gateway.database_updated ? " Đã đồng bộ trạng thái đơn hàng." : ""}`,
-      );
-      await fetchOrders();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Không thể đối soát VNPay.");
-    } finally {
-      setBusy(false);
-    }
+      const result = await request<{ payment_status: string }>("/payments/sepay/orders/" + orderId + "/reconcile", { method: "POST" });
+      setSuccess(result.payment_status === "success" ? "Đã ghi nhận chuyển khoản SePay." : "Chưa ghi nhận khoản chuyển khớp với đơn.");
+      refreshOrders();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Không thể đối soát SePay."); }
+    finally { setBusy(false); }
   };
 
   // Filter orders
-  const filteredOrders = orders.filter((order) => {
-    if (statusFilter !== "all" && order.order_status !== statusFilter) return false;
-    if (paymentFilter !== "all" && order.payment_method !== paymentFilter) return false;
-    if (search.trim()) {
-      const q = search.toLowerCase().trim();
-      const matchId = order._id.toLowerCase().includes(q);
-      const matchName = order.receiver_name.toLowerCase().includes(q);
-      const matchPhone = order.receiver_phone.includes(q);
-      const matchEmail = order.user_id?.email.toLowerCase().includes(q);
-      if (!matchId && !matchName && !matchPhone && !matchEmail) return false;
-    }
-    return true;
-  });
+  const filteredOrders = orders;
 
   // Calculate status counts
   const counts: Record<string, number> = {
-    all: orders.length,
-    pending: orders.filter((o) => o.order_status === "pending").length,
-    processing: orders.filter((o) => o.order_status === "processing").length,
-    shipping: orders.filter((o) => o.order_status === "shipping").length,
-    completed: orders.filter((o) => o.order_status === "completed").length,
-    cancelled: orders.filter((o) => o.order_status === "cancelled").length,
+    all: 0, pending: 0, processing: 0, shipping: 0, completed: 0, cancelled: 0,
+    ...pagination?.statusCounts,
   };
 
   return (
     <div className="admin-orders-page">
-      <div className="admin-panel">
-        <div className="admin-toolbar">
-          <div>
-            <h2>Quản lý đơn hàng & Vận chuyển</h2>
-            <p className="admin-muted">
-              Theo dõi tiến độ, thanh toán và in phiếu giao hàng cho khách ({orders.length} đơn).
-            </p>
-          </div>
+      <div className="admin-adminlist-header">
+        <p className="admin-muted">{view?.description ?? "Theo dõi đơn, thanh toán và tiến độ giao hàng."}</p>
           <button
             type="button"
-            className="admin-button"
-            onClick={() => { setLoading(true); setError(""); void fetchOrders(); }}
+            className="admin-icon-button"
+            aria-label="Làm mới đơn"
+            title="Làm mới đơn"
+            onClick={() => { setError(""); refreshOrders(); }}
             disabled={loading || busy}
           >
-            {loading ? "Đang tải..." : "🔄 Làm mới đơn"}
+            <AdminIcon name="refresh" />
           </button>
-        </div>
+      </div>
+      <div className="admin-panel">
 
-        {error && <p className="admin-alert">{error}</p>}
-        {success && <p className="admin-success">{success}</p>}
+        {error && !selectedOrder && <AdminFeedback kind="error" message={error} />}
+        {success && !selectedOrder && <AdminFeedback kind="success" message={success} />}
 
+        {queue && <p className="workspace-current-filter"><strong>{queueLabels[queue]}</strong><button type="button" onClick={() => navigate("orders")}>Xem tất cả đơn</button></p>}
         {/* STATUS TABS */}
-        <div className="admin-order-tabs">
+        {!view && <div className="admin-order-tabs" aria-label="Lọc theo trạng thái đơn">
           {[
             { id: "all", label: "Tất cả đơn" },
             { id: "pending", label: "Chờ xác nhận" },
             { id: "processing", label: "Đang xử lý" },
             { id: "shipping", label: "Đang giao" },
+            { id: "delivery_failed", label: "Giao thất bại" },
+            { id: "returning", label: "Đang hoàn về" },
+            { id: "returned", label: "Đã kiểm hàng hoàn" },
             { id: "completed", label: "Hoàn thành" },
             { id: "cancelled", label: "Đã hủy" },
           ].map((tab) => (
@@ -217,67 +238,84 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
               key={tab.id}
               type="button"
               className={`order-tab-btn ${statusFilter === tab.id ? "active" : ""}`}
-              onClick={() => setStatusFilter(tab.id)}
+              aria-pressed={statusFilter === tab.id}
+              onClick={() => { setStatusFilter(tab.id); setPage(1); setLoading(true); }}
             >
               {tab.label}
-              <span className="order-tab-count">{counts[tab.id] ?? 0}</span>
+              <span className="order-tab-count">{loading || listError ? "—" : counts[tab.id] ?? 0}</span>
             </button>
           ))}
-        </div>
+        </div>}
 
         {/* SEARCH & FILTERS */}
         <div className="admin-filter-bar">
           <div className="admin-search-form">
             <input
               type="text"
+              aria-label="Tìm đơn hàng"
               placeholder="Tìm theo mã đơn, họ tên, SĐT khách..."
+              maxLength={100}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); setLoading(true); }}
               className="admin-search-input"
             />
             {search && (
-              <button type="button" onClick={() => setSearch("")}>
+              <button type="button" onClick={() => { setSearch(""); setPage(1); setLoading(true); }}>
                 Xóa
               </button>
             )}
           </div>
 
           <div className="filter-select-group">
-            <label>Thanh toán:</label>
+            <label htmlFor="admin-order-payment-filter">Thanh toán:</label>
             <select
+              id="admin-order-payment-filter"
               value={paymentFilter}
-              onChange={(e) => setPaymentFilter(e.target.value)}
+              onChange={(e) => { setPaymentFilter(e.target.value); setPage(1); setLoading(true); }}
               className="admin-select"
             >
               <option value="all">Tất cả phương thức</option>
-              <option value="COD">Thanh toán COD</option>
-              <option value="BankTransfer">Chuyển khoản (BankTransfer)</option>
-              <option value="VNPay">Cổng VNPay</option>
-              <option value="SePay">SePay</option>
-              <option value="MoMo">Ví MoMo</option>
+              {Object.entries(paymentMethodText).map(([id, label]) => <option value={id} key={id}>{label}</option>)}
+            </select>
+          </div>
+          <div className="filter-select-group">
+            <label htmlFor="admin-order-shipping-filter">Giao hàng</label>
+            <select id="admin-order-shipping-filter" className="admin-select" value={shippingFilter} onChange={(event) => { setShippingFilter(event.target.value); setPage(1); setLoading(true); }}>
+              <option value="all">Tất cả hình thức</option>
+              {Object.entries(shippingLabels).map(([id, label]) => <option value={id} key={id}>{label}</option>)}
+            </select>
+          </div>
+          <div className="filter-select-group">
+            <label htmlFor="admin-order-period-filter">Ngày đặt</label>
+            <select id="admin-order-period-filter" className="admin-select" value={periodFilter} onChange={(event) => { setPeriodFilter(event.target.value); setPage(1); setLoading(true); }}>
+              <option value="all">Mọi thời điểm</option><option value="1">Hôm nay</option><option value="7">7 ngày gần nhất</option><option value="30">30 ngày gần nhất</option>
             </select>
           </div>
         </div>
 
         {/* ORDERS TABLE */}
-        <div className="admin-table-wrap">
-          <table className="admin-table">
+        <div className="admin-table-wrap" role="region" aria-label="Bảng đơn hàng" tabIndex={0}>
+          <table className="admin-table admin-orders-table">
             <thead>
               <tr>
-                <th>Mã đơn / Ngày</th>
-                <th>Khách nhận hàng</th>
-                <th>Sản phẩm</th>
-                <th>Phương thức TT</th>
+                <th>Mã đơn</th>
+                <th>Khách hàng</th>
+                <th>Ngày đặt</th>
+                <th>Số SP</th>
                 <th>Tổng tiền</th>
+                <th>Thanh toán</th>
+                <th>Giao hàng</th>
                 <th>Trạng thái</th>
                 <th style={{ textAlign: "right" }}>Thao tác</th>
               </tr>
             </thead>
             <tbody>
-              {filteredOrders.length === 0 ? (
+              {loading || listError || filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="admin-empty">
-                    {loading ? "Đang tải đơn hàng..." : "Không có đơn hàng nào khớp điều kiện lọc."}
+                  <td colSpan={9} className="admin-empty">
+                    {loading ? <AdminFeedback kind="loading" message="Đang tải đơn hàng…" /> : listError
+                      ? <AdminFeedback kind="error" message={listError} onRetry={refreshOrders} />
+                      : <AdminFeedback kind="empty" message={view?.empty ?? "Không có đơn hàng nào khớp điều kiện lọc."} />}
                   </td>
                 </tr>
               ) : (
@@ -289,42 +327,23 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                     ? nextOrderStatus[order.order_status as keyof typeof nextOrderStatus]
                     : null;
                   const canCancel =
-                    order.payment_status !== "success" && (order.order_status === "pending" || order.order_status === "processing");
+                    (isAdmin || (order.payment_status !== "success" && order.payment_method !== "PayOS")) && (order.order_status === "pending" || order.order_status === "processing");
 
                   return (
                     <tr key={order._id}>
                       <td>
-                        <strong>#{order._id.slice(-8).toUpperCase()}</strong>
-                        <br />
-                        <small>{new Date(order.created_at).toLocaleString("vi-VN")}</small>
+                        <strong className="admin-order-number">#{order._id.slice(-8).toUpperCase()}</strong>
                       </td>
                       <td>
                         <strong>{order.receiver_name}</strong>
                         <br />
                         <small>{order.receiver_phone}</small>
-                        <br />
-                        <small className="admin-muted">{order.user_id?.email}</small>
                       </td>
+                      <td><time dateTime={order.created_at}>{Number.isFinite(Date.parse(order.created_at)) ? orderDate.format(new Date(order.created_at)) : "—"}</time></td>
+                      <td>{order.items.length ? order.items.reduce((total, item) => total + item.quantity, 0) : "—"}</td>
+                      <td><strong>{formatPrice(order.final_amount)}</strong></td>
                       <td>
-                        {order.items.length ? (
-                          <div className="order-items-preview">
-                            {order.items.slice(0, 2).map((it, idx) => (
-                              <div key={idx} className="preview-line">
-                                • {it.product_name} ({it.size}) × {it.quantity}
-                              </div>
-                            ))}
-                            {order.items.length > 2 && (
-                              <small className="admin-muted">
-                                +{order.items.length - 2} món khác
-                              </small>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="admin-muted">Không có chi tiết</span>
-                        )}
-                      </td>
-                      <td>
-                        <span className="payment-method-chip">{order.payment_method}</span>
+                        <span className="payment-method-chip">{order.payment_method === "COD" ? "COD" : paymentMethodText[order.payment_method] ?? order.payment_method}</span>
                         <br />
                         <small
                           className={`payment-status-badge ${order.payment_status === "success" ? "paid" : "unpaid"}`}
@@ -332,9 +351,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                           {paymentStatusText[order.payment_status]}
                         </small>
                       </td>
-                      <td>
-                        <strong>{formatPrice(order.final_amount)}</strong>
-                      </td>
+                      <td>{order.shipping_method ? shippingLabels[order.shipping_method] ?? order.shipping_method : "—"}</td>
                       <td>
                         <span className={`status-pill status-${order.order_status}`}>
                           {statusLabels[order.order_status] ?? order.order_status}
@@ -353,10 +370,10 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                           <button
                             type="button"
                             className="print-action-btn"
-                            title="In hóa đơn xuất kho"
+                            title="In phiếu đơn hàng"
                             onClick={() => setInvoiceOrder(order)}
                           >
-                            🖨️ In
+                            In
                           </button>
 
                           {canAdvance && nextStatus && (
@@ -366,7 +383,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                               disabled={busy}
                               onClick={() => void updateOrderStatus(order._id, nextStatus)}
                             >
-                              → {statusLabels[nextStatus]}
+                              → {nextStatus === "completed" && order.payment_method === "COD" ? "Hoàn thành · đã thu COD" : statusLabels[nextStatus]}
                             </button>
                           )}
 
@@ -389,12 +406,13 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
             </tbody>
           </table>
         </div>
+        {!listError && <AdminPagination page={page} pagination={{ ...pagination, totalPages: pagination?.totalPages ?? 1, limit }} loading={loading} onPage={(value) => { setPage(value); setLoading(true); }} onLimit={(value) => { setLimit(value); setPage(1); setLoading(true); }} />}
       </div>
 
       {/* MODAL: ORDER DETAILS */}
       {selectedOrder && (
         <div className="admin-modal-backdrop" onClick={() => setSelectedOrder(null)}>
-          <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="admin-modal" role="dialog" aria-modal="true" aria-label="Chi tiết đơn hàng" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Chi tiết đơn hàng #{selectedOrder._id.slice(-8).toUpperCase()}</h2>
               <button
@@ -407,6 +425,8 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
             </div>
 
             <div className="modal-body">
+              {error && <p className="admin-alert" role="alert">{error}</p>}
+              {success && <p className="admin-success" role="status">{success}</p>}
               <div className="order-detail-meta-grid">
                 <div className="meta-card">
                   <h4>Người nhận</h4>
@@ -421,7 +441,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                 <div className="meta-card">
                   <h4>Thanh toán & Vận chuyển</h4>
                   <p>
-                    PTTT: <strong>{selectedOrder.payment_method}</strong>
+                    PTTT: <strong>{paymentMethodText[selectedOrder.payment_method]}</strong>
                   </p>
                   <p>
                     Trạng thái TT:{" "}
@@ -444,7 +464,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
               </div>
 
               {/* Special action for BankTransfer */}
-              {isAdmin && selectedOrder.order_status === "pending" && selectedOrder.payment_method === "BankTransfer" &&
+              {isAdmin && ["pending", "cancelled"].includes(selectedOrder.order_status) && selectedOrder.payment_method === "BankTransfer" &&
                 selectedOrder.payment_status === "pending" && (
                   <div className="admin-payment-action-box">
                     <h4>Xác nhận nhận chuyển khoản ngân hàng</h4>
@@ -458,6 +478,10 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                           disabled={busy}
                         />
                       </label>
+                      <label>
+                        Số tiền thực nhận theo sao kê (VNĐ)
+                        <input name="amount" type="number" min={1} step={1} required disabled={busy} />
+                      </label>
                       <button type="submit" className="admin-button" disabled={busy}>
                         {busy ? "Đang xử lý..." : "Xác nhận đã nhận tiền"}
                       </button>
@@ -465,28 +489,28 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                   </div>
                 )}
 
-              {/* Special action for VNPay */}
-              {isAdmin && selectedOrder.order_status === "pending" && selectedOrder.payment_method === "VNPay" &&
-                selectedOrder.payment_status === "pending" && (
+              {/* Đối soát SePay từ backend */}
+              {isAdmin && selectedOrder.payment_method === "SePay" && ((selectedOrder.order_status === "pending" && selectedOrder.payment_status === "pending") || (selectedOrder.order_status === "cancelled" && selectedOrder.payment_status === "failed")) && (
                   <div className="admin-payment-action-box">
-                    <h4>Đối soát cổng thanh toán VNPay</h4>
+                    <h4>Đối soát thanh toán SePay</h4>
                     <p className="admin-muted">
-                      Kiểm tra trạng thái giao dịch trực tiếp với VNPay API và đồng bộ vào hệ thống.
+                      Kiểm tra trạng thái giao dịch trực tiếp với SePay và đồng bộ vào hệ thống.
                     </p>
                     <button
                       type="button"
                       className="admin-button"
                       disabled={busy}
-                      onClick={() => void reconcileVNPay(selectedOrder._id)}
+                      onClick={() => void reconcileSePay(selectedOrder._id)}
                     >
-                      {busy ? "Đang đối soát..." : "Đối soát VNPay"}
+                      {busy ? "Đang đối soát..." : "Đối soát SePay"}
                     </button>
                   </div>
                 )}
 
+              <OrderReturnPanel key={selectedOrder._id} order={selectedOrder} request={request} isAdmin={isAdmin} onChanged={refreshOrders} />
               {/* ITEMS LIST */}
               <h4 style={{ marginTop: "20px" }}>Danh sách sản phẩm ({selectedOrder.items.length})</h4>
-              <table className="admin-table">
+              <div className="admin-table-wrap" role="region" aria-label="Sản phẩm trong đơn" tabIndex={0}><table className="admin-table">
                 <thead>
                   <tr>
                     <th>Sản phẩm</th>
@@ -511,7 +535,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
 
               <div className="modal-total-banner">
                 <span>Tổng giá trị đơn hàng:</span>
@@ -527,7 +551,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                   setInvoiceOrder(selectedOrder);
                 }}
               >
-                🖨️ In hóa đơn xuất kho
+                In phiếu đơn hàng
               </button>
 
               {selectedOrder.order_status in nextOrderStatus &&
@@ -555,10 +579,11 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                       ]
                     }
                     &quot;
+                    {selectedOrder.order_status === "shipping" && selectedOrder.payment_method === "COD" && " và xác nhận đã thu tiền COD"}
                   </button>
                 )}
 
-              {selectedOrder.payment_status !== "success" && (selectedOrder.order_status === "pending" ||
+              {(isAdmin || (selectedOrder.payment_status !== "success" && selectedOrder.payment_method !== "PayOS")) && (selectedOrder.order_status === "pending" ||
                 selectedOrder.order_status === "processing") && (
                 <button
                   type="button"
@@ -586,6 +611,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
         <div className="admin-modal-backdrop" onClick={() => setCancelModalOrder(null)}>
           <div
             className="admin-modal small-modal"
+            role="dialog" aria-modal="true" aria-label="Xác nhận hủy đơn hàng"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-header">
@@ -605,13 +631,14 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                   <strong>#{cancelModalOrder._id.slice(-8).toUpperCase()}</strong>?
                 </p>
                 <p className="admin-muted" style={{ fontSize: "13px" }}>
-                  Toàn bộ các mặt hàng trong đơn sẽ được tự động hoàn lại số lượng tồn kho.
+                  {cancelModalOrder.payment_status === "success" ? "Hủy đơn sẽ trả hàng về kho và đưa số tiền đã thu vào danh sách Chờ hoàn tiền. Quản trị viên ghi chứng từ sau khi chuyển hoàn cho khách." : "Số lượng đã giữ cho đơn này sẽ được trả về kho."}
                 </p>
+                {cancelModalOrder.payment_method === "PayOS" && cancelModalOrder.payment_status === "pending" && <label><input name="legacy_link_closed" type="checkbox" required /> Tôi đã đối chiếu tài khoản nhận tiền, xác minh đơn chưa thu tiền và liên kết cũ đã đóng hoặc chưa được tạo.</label>}
                 <label style={{ display: "block", marginTop: "12px" }}>
                   Lý do hủy đơn:
                   <textarea
                     required
-                    value={cancelReason}
+                    maxLength={1000} value={cancelReason}
                     onChange={(e) => setCancelReason(e.target.value)}
                     placeholder="VD: Khách hàng đổi ý, hết size sản phẩm, sai địa chỉ..."
                     rows={3}
@@ -620,7 +647,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
                 </label>
               </div>
               <div className="modal-footer">
-                <button type="submit" className="admin-button danger" disabled={busy}>
+                <button type="submit" className="admin-button danger" disabled={busy || !cancelReason.trim()}>
                   {busy ? "Đang hủy..." : "Xác nhận hủy đơn & Hoàn kho"}
                 </button>
                 <button
@@ -639,7 +666,7 @@ export default function AdminOrders({ request, isAdmin }: { request: AdminReques
       {/* PRINT INVOICE MODAL */}
       {invoiceOrder && (
         <OrderInvoiceModal
-          order={invoiceOrder}
+          order={invoiceOrder} request={request}
           onClose={() => setInvoiceOrder(null)}
         />
       )}

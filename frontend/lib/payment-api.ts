@@ -49,7 +49,7 @@ export interface CreateOnlinePaymentResponse {
 }
 
 async function createGatewayCheckout<T>(
-  gateway: "momo" | "sepay" | "vnpay",
+  gateway: "momo" | "sepay",
   orderId: string,
   token: string,
 ): Promise<T> {
@@ -103,18 +103,6 @@ export async function reconcileSePayOrder(orderId: string, token: string): Promi
     headers: authenticatedHeaders(token),
   });
   await readApiEnvelope(response, true);
-}
-
-export interface CreateVNPayResponse {
-  payment_id: string;
-  order_id: string;
-  payment_url: string;
-  expires_at: string;
-  reused: boolean;
-}
-
-export function createVNPayCheckout(orderId: string, token: string) {
-  return createGatewayCheckout<CreateVNPayResponse>("vnpay", orderId, token);
 }
 
 export interface BankTransferPaymentResponse {

@@ -11,7 +11,7 @@ import { formatVnd } from "@/data/products";
 const states = {
   loading: { title: "Đang kiểm tra thanh toán", message: "Đang tải trạng thái giao dịch.", mark: "…" },
   pending: { title: "Đang chờ xác nhận", message: "Hệ thống đang chờ xác nhận từ cổng thanh toán.", mark: "…" },
-  success: { title: "Thanh toán thành công", message: "F.Style đã ghi nhận khoản thanh toán của bạn.", mark: "✓" },
+  success: { title: "Thanh toán thành công", message: "VSC_BAPD đã ghi nhận khoản thanh toán của bạn.", mark: "✓" },
   failed: { title: "Thanh toán thất bại", message: "Mở chi tiết đơn để xem trạng thái và các lựa chọn thanh toán còn khả dụng.", mark: "×" },
   refunded: { title: "Đã hoàn tiền", message: "Đơn hàng đã được cập nhật trạng thái hoàn tiền.", mark: "↩" },
   error: { title: "Kết quả thanh toán", message: "Chưa thể tải trạng thái giao dịch.", mark: "!" },

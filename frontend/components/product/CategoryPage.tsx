@@ -1,31 +1,42 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
+import { changeCatalogFilters } from "@/lib/catalog-query";
 import Link from "next/link";
+import CategoryTiles from "@/components/product/CategoryTiles";
 import ProductCard from "@/components/product/ProductCard";
+import CatalogFilterDrawer from "@/components/product/CatalogFilterDrawer";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 import { useCatalogCategories } from "@/lib/useCatalogCategories";
+import { STORE_NAME } from "@/lib/store-brand";
 import { getAudienceName, getCategoryTree } from "@/lib/catalog-audience";
+import { featuredRatingSort } from "@/lib/product-sorting";
 
 const PAGE_SIZE = 12;
 
 export default function CategoryPage({ slug, audience }: { slug: string; audience?: string }) {
   const { categories, error: categoryLoadError, loading: loadingCategories } = useCatalogCategories();
-  const [selectedColors, setSelectedColors] = useState<string[]>([]);
-  const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
-  const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [minimumPrice, setMinimumPrice] = useState("");
-  const [maximumPrice, setMaximumPrice] = useState("");
-  const [sort, setSort] = useState("featured");
-  const [currentPage, setCurrentPage] = useState(1);
+  const params = useSearchParams();
+  const selectedColors = useMemo(() => params.getAll("color"), [params]);
+  const selectedSizes = useMemo(() => params.getAll("size"), [params]);
+  const selectedBrands = useMemo(() => params.getAll("brand"), [params]);
+  const statusParam = params.get("status") ?? "";
+  const statusFilter = ["instock", "outofstock", "sale"].includes(statusParam) ? statusParam : "all";
+  const minimumPrice = params.get("minPrice") ?? "";
+  const maximumPrice = params.get("maxPrice") ?? "";
+  const sortParam = params.get("sort") ?? "";
+  const sort = ["newest", "price-asc", "price-desc", featuredRatingSort.value].includes(sortParam) ? sortParam : "featured";
+  const page = Number(params.get("page"));
+  const currentPage = Number.isSafeInteger(page) && page > 0 ? page : 1;
   const { products, error: catalogError, loading } = useCatalogProducts();
 
   const category = categories?.find((item) => item.slug === slug);
   const isAudience = Boolean(getAudienceName(slug));
-  const audienceSlug = audience && getAudienceName(audience) ? audience : isAudience ? slug : "";
+  const audienceSlug = isAudience ? slug : audience && getAudienceName(audience) ? audience : "";
   const categoryName = category?.name ?? getAudienceName(slug);
   const categoryDescription = category?.description;
+  const subcategories = category ? categories?.filter((item) => item.parent_id === category._id) ?? [] : [];
 
   const categoryProducts = useMemo(() => {
     if (!categories || (!category && !isAudience)) return [];
@@ -45,7 +56,7 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
     first.localeCompare(second, "vi", { numeric: true }),
   );
   const availableBrands = [
-    ...new Set(categoryProducts.map((product) => product.brand ?? "F.Style").filter(Boolean)),
+    ...new Set(categoryProducts.map((product) => product.brand ?? STORE_NAME).filter(Boolean)),
   ].sort();
 
   const visibleProducts = useMemo(() => {
@@ -59,7 +70,7 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
             (!selectedColors.length || selectedColors.includes(variant.color)) &&
             (!selectedSizes.length || selectedSizes.includes(variant.size)),
         );
-      const matchesBrand = !selectedBrands.length || selectedBrands.includes(product.brand ?? "F.Style");
+      const matchesBrand = !selectedBrands.length || selectedBrands.includes(product.brand ?? STORE_NAME);
       const isOutOfStock = product.variants?.length === 0 || product.inStock === false;
       const isOnSale =
         Boolean(product.discountPercent && product.discountPercent > 0) ||
@@ -88,29 +99,16 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
         return timeB - timeA;
       });
     }
-    if (sort === "bestseller") {
-      filtered.sort(
-        (first, second) =>
-          Number(Boolean(second.isFeatured)) - Number(Boolean(first.isFeatured)) || second.rating - first.rating,
-      );
-    }
+    if (sort === featuredRatingSort.value) filtered.sort(featuredRatingSort.compare);
     return filtered;
   }, [categoryProducts, maximumPrice, minimumPrice, selectedBrands, selectedColors, selectedSizes, sort, statusFilter]);
 
-  function toggleFilterValue(value: string, selected: string[], setSelected: (values: string[]) => void) {
-    setSelected(selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value]);
-    setCurrentPage(1);
+  function toggleFilterValue(key: string, value: string, selected: string[]) {
+    changeCatalogFilters({ [key]: selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value] });
   }
 
   function clearFilters() {
-    setSelectedColors([]);
-    setSelectedSizes([]);
-    setSelectedBrands([]);
-    setStatusFilter("all");
-    setMinimumPrice("");
-    setMaximumPrice("");
-    setSort("featured");
-    setCurrentPage(1);
+    changeCatalogFilters({ color: "", size: "", brand: "", status: "", minPrice: "", maxPrice: "", sort: "" });
   }
 
   const hasActiveFilters =
@@ -134,9 +132,14 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
             <Link href="/">Trang chủ</Link> / {categoryName ?? "Danh mục"}
           </div>
           <h1>{categoryName ?? "Danh mục"}</h1>
-          <p>{categoryDescription ?? ""}</p>
+          {categoryDescription && <p>{categoryDescription}</p>}
         </div>
       </div>
+      {subcategories.length > 0 && (
+        <nav className="catalog-subcategories" aria-label="Danh mục con">
+          <CategoryTiles categories={subcategories} audience={audienceSlug || undefined} />
+        </nav>
+      )}
       {(catalogError || categoryLoadError) && (
         <p className="catalog-result-count" role="alert">
           {catalogError || categoryLoadError}
@@ -144,130 +147,119 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
       )}
       {(loading || loadingCategories) && <p role="status">Đang tải danh mục...</p>}
       {categories && !categoryName && !categoryLoadError && <p>Không tìm thấy danh mục.</p>}
-      {categoryProducts.length > 0 && <div className="category-filter-toolbar" aria-label="Lọc sản phẩm">
-        <details className="category-filter">
-          <summary>
-            Màu sắc{selectedColors.length > 0 && <span> ({selectedColors.length})</span>}
-          </summary>
-          <div className="category-filter-popover">
-            {!availableColors.length && <span>Chưa có màu sắc.</span>}
-            {availableColors.map((color) => (
-              <label key={color}>
-                <input
-                  type="checkbox"
-                  checked={selectedColors.includes(color)}
-                  onChange={() => toggleFilterValue(color, selectedColors, setSelectedColors)}
-                />
-                {color}
-              </label>
-            ))}
-          </div>
-        </details>
-        <details className="category-filter">
-          <summary>
-            Kích cỡ{selectedSizes.length > 0 && <span> ({selectedSizes.length})</span>}
-          </summary>
-          <div className="category-filter-popover">
-            {!availableSizes.length && <span>Chưa có kích cỡ.</span>}
-            {availableSizes.map((size) => (
-              <label key={size}>
-                <input
-                  type="checkbox"
-                  checked={selectedSizes.includes(size)}
-                  onChange={() => toggleFilterValue(size, selectedSizes, setSelectedSizes)}
-                />
-                {size}
-              </label>
-            ))}
-          </div>
-        </details>
-        <details className="category-filter">
-          <summary>
-            Thương hiệu{selectedBrands.length > 0 && <span> ({selectedBrands.length})</span>}
-          </summary>
-          <div className="category-filter-popover">
-            {!availableBrands.length && <span>Chưa có thương hiệu.</span>}
-            {availableBrands.map((brand) => (
-              <label key={brand}>
-                <input
-                  type="checkbox"
-                  checked={selectedBrands.includes(brand)}
-                  onChange={() => toggleFilterValue(brand, selectedBrands, setSelectedBrands)}
-                />
-                {brand}
-              </label>
-            ))}
-          </div>
-        </details>
-        <details className="category-filter">
-          <summary>Giá</summary>
-          <div className="category-filter-popover category-price-filter">
-            <label>
-              Từ
-              <input
-                type="number"
-                min="0"
-                value={minimumPrice}
-                onChange={(event) => {
-                  setMinimumPrice(event.target.value);
-                  setCurrentPage(1);
-                }}
-                placeholder="0"
-              />
-            </label>
-            <label>
-              Đến
-              <input
-                type="number"
-                min="0"
-                value={maximumPrice}
-                onChange={(event) => {
-                  setMaximumPrice(event.target.value);
-                  setCurrentPage(1);
-                }}
-                placeholder="Không giới hạn"
-              />
-            </label>
-          </div>
-        </details>
-        <label className="category-sort">
-          Trạng thái
-          <select
-            value={statusFilter}
-            onChange={(event) => {
-              setStatusFilter(event.target.value);
-              setCurrentPage(1);
-            }}
-          >
-            <option value="all">Tất cả</option>
-            <option value="instock">Còn hàng</option>
-            <option value="outofstock">Hết hàng</option>
-            <option value="sale">Đang giảm giá</option>
-          </select>
-        </label>
-        <label className="category-sort">
+      <div className={categoryProducts.length ? "category-results has-filters" : "category-results"}>
+      {categoryProducts.length > 0 && <div className="store-catalog-controls">
+        <p className="catalog-result-count" aria-live="polite">Tìm thấy {visibleProducts.length} sản phẩm</p>
+        <label className="store-catalog-sort">
           Sắp xếp
           <select
             value={sort}
-            onChange={(event) => {
-              setSort(event.target.value);
-              setCurrentPage(1);
-            }}
+            onChange={(event) => changeCatalogFilters({ sort: event.target.value === "featured" ? "" : event.target.value })}
           >
             <option value="featured">Nổi bật</option>
             <option value="newest">Mới nhất</option>
-            <option value="bestseller">Bán chạy</option>
+            <option value={featuredRatingSort.value}>{featuredRatingSort.label}</option>
             <option value="price-asc">Giá: thấp đến cao</option>
             <option value="price-desc">Giá: cao đến thấp</option>
           </select>
         </label>
-        {hasActiveFilters && (
-          <button className="category-filter-reset" type="button" onClick={clearFilters}>
-            Xóa bộ lọc
-          </button>
-        )}
+        <CatalogFilterDrawer desktopSidebar active={hasActiveFilters} count={visibleProducts.length} onReset={clearFilters}>
+          <div className="catalog-toolbar category-filter-panel">
+            <details className="category-filter">
+              <summary>
+                Màu sắc{selectedColors.length > 0 && <span> ({selectedColors.length})</span>}
+              </summary>
+              <div className="category-filter-popover">
+                {!availableColors.length && <span>Chưa có màu sắc.</span>}
+                {availableColors.map((color) => (
+                  <label key={color}>
+                    <input
+                      type="checkbox"
+                      checked={selectedColors.includes(color)}
+                      onChange={() => toggleFilterValue("color", color, selectedColors)}
+                    />
+                    {color}
+                  </label>
+                ))}
+              </div>
+            </details>
+            <details className="category-filter">
+              <summary>
+                Kích cỡ{selectedSizes.length > 0 && <span> ({selectedSizes.length})</span>}
+              </summary>
+              <div className="category-filter-popover">
+                {!availableSizes.length && <span>Chưa có kích cỡ.</span>}
+                {availableSizes.map((size) => (
+                  <label key={size}>
+                    <input
+                      type="checkbox"
+                      checked={selectedSizes.includes(size)}
+                      onChange={() => toggleFilterValue("size", size, selectedSizes)}
+                    />
+                    {size}
+                  </label>
+                ))}
+              </div>
+            </details>
+            <details className="category-filter">
+              <summary>
+                Thương hiệu{selectedBrands.length > 0 && <span> ({selectedBrands.length})</span>}
+              </summary>
+              <div className="category-filter-popover">
+                {!availableBrands.length && <span>Chưa có thương hiệu.</span>}
+                {availableBrands.map((brand) => (
+                  <label key={brand}>
+                    <input
+                      type="checkbox"
+                      checked={selectedBrands.includes(brand)}
+                      onChange={() => toggleFilterValue("brand", brand, selectedBrands)}
+                    />
+                    {brand}
+                  </label>
+                ))}
+              </div>
+            </details>
+            <details className="category-filter">
+              <summary>Giá</summary>
+              <div className="category-filter-popover category-price-filter">
+                <label>
+                  Từ
+                  <input
+                    type="number"
+                    min="0"
+                    value={minimumPrice}
+                    onChange={(event) => changeCatalogFilters({ minPrice: event.target.value }, true)}
+                    placeholder="0"
+                  />
+                </label>
+                <label>
+                  Đến
+                  <input
+                    type="number"
+                    min="0"
+                    value={maximumPrice}
+                    onChange={(event) => changeCatalogFilters({ maxPrice: event.target.value }, true)}
+                    placeholder="Không giới hạn"
+                  />
+                </label>
+              </div>
+            </details>
+            <label className="category-sort">
+              Trạng thái
+              <select
+                value={statusFilter}
+                onChange={(event) => changeCatalogFilters({ status: event.target.value === "all" ? "" : event.target.value })}
+              >
+                <option value="all">Tất cả</option>
+                <option value="instock">Còn hàng</option>
+                <option value="outofstock">Hết hàng</option>
+                <option value="sale">Đang giảm giá</option>
+              </select>
+            </label>
+          </div>
+        </CatalogFilterDrawer>
       </div>}
-      {categoryName && !loading && !catalogError && (
+      {categoryName && !loading && !catalogError && categoryProducts.length === 0 && (
         <p className="catalog-result-count">Tìm thấy {visibleProducts.length} sản phẩm</p>
       )}
       {paginatedProducts.length ? (
@@ -283,7 +275,7 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
                 type="button"
                 className="pagination-btn"
                 disabled={safePage <= 1}
-                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                onClick={() => changeCatalogFilters({ page: safePage > 2 ? String(safePage - 1) : "" })}
               >
                 ← Trang trước
               </button>
@@ -293,7 +285,8 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
                     key={pageNumber}
                     type="button"
                     className={`pagination-page${pageNumber === safePage ? " active" : ""}`}
-                    onClick={() => setCurrentPage(pageNumber)}
+                    aria-current={pageNumber === safePage ? "page" : undefined}
+                    onClick={() => changeCatalogFilters({ page: pageNumber > 1 ? String(pageNumber) : "" })}
                   >
                     {pageNumber}
                   </button>
@@ -303,7 +296,7 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
                 type="button"
                 className="pagination-btn"
                 disabled={safePage >= totalPages}
-                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                onClick={() => changeCatalogFilters({ page: String(safePage + 1) })}
               >
                 Trang sau →
               </button>
@@ -331,6 +324,7 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
           </div>
         )
       )}
+      </div>
     </section>
   );
 }
