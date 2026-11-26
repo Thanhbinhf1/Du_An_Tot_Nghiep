@@ -71,15 +71,14 @@ export default function GoogleSignIn({ remember = true, acceptedTerms = true, si
     return () => { active = false; element.replaceChildren(); };
   }, [acceptedTerms, clientId, ready, redirectTo, remember, router, signUp]);
 
+  if (!clientId) return error ? <p role="alert" className={styles.loginError}>{error}</p> : null;
   return (
     <div>
       <div className={styles.divider}>Hoặc</div>
       {clientId && <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive"
         onReady={() => setReady(true)} onError={() => setError("Không thể tải đăng nhập Google.")} />}
-      {clientId && ready && acceptedTerms
-        ? <div className={styles.googleMount} ref={target} aria-busy={busy} />
-        : <button type="button" className={styles.google} disabled>{signUp ? "Đăng ký bằng Google" : "Tiếp tục với Google"}</button>}
-      {clientId === null && !error && <p className="small muted">Google chưa được cấu hình cho cửa hàng.</p>}
+      {ready && acceptedTerms && <div className={styles.googleMount} ref={target} aria-busy={busy} />}
+      {!ready && !error && <p role="status">Đang tải đăng nhập Google…</p>}
       {clientId && !acceptedTerms && <p className="small muted">Đồng ý điều khoản để đăng ký với Google.</p>}
       {busy && <p role="status">Đang xác minh tài khoản Google…</p>}
       {error && <p role="alert" className={styles.loginError}>{error}</p>}

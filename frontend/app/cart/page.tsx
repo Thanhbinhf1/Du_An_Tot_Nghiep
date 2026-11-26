@@ -116,9 +116,12 @@ function CartContent({ token }: { token: string }) {
   const items = cart?.items ?? [];
 
   return (
-    <div className="container">
+    <div className="container shopping-cart">
+      <nav className="breadcrumb store-purchase-path" aria-label="Vị trí trong cửa hàng">
+        <Link href="/products">Cửa hàng</Link> <span aria-hidden="true">/</span> <span aria-current="page">Giỏ hàng</span>
+      </nav>
       <div className="cart-header-row">
-        <h1 className="page-title">Giỏ hàng ({cart?.total_quantity ?? 0} sản phẩm)</h1>
+        <h1 className="page-title">Giỏ hàng{cart && ` (${cart.total_quantity} sản phẩm)`}</h1>
         {items.length > 0 && (
           <button
             type="button"
@@ -144,10 +147,10 @@ function CartContent({ token }: { token: string }) {
         </div>
       )}
 
-      {items.length === 0 ? (
+      {items.length === 0 ? !error && (
         <div className="empty-state cart-empty">
           <h2>Giỏ hàng của bạn đang trống</h2>
-          <p>Khám phá sản phẩm mới và chọn món đồ yêu thích tại F.Style.</p>
+          <p>Khám phá sản phẩm mới và chọn món đồ yêu thích tại VSC_BAPD.</p>
           <Link className="pill-button dark" href="/products">
             Tiếp tục mua sắm
           </Link>

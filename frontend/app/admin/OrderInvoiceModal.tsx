@@ -1,9 +1,12 @@
 "use client";
 
-import React from "react";
+import { useEffect, useState } from "react";
+import type { AdminRequest } from "./ProductVariantsManager";
+import { orderStatusText, paymentMethodText, paymentStatusText, type PaymentMethod } from "@/lib/order-api";
 import type { OrderPaymentStatus } from "@/lib/order-api";
 
 export type OrderItem = {
+  _id?: string;
   product_name: string;
   sku: string;
   size: string;
@@ -23,9 +26,11 @@ export type FullAdminOrder = {
   discount_amount?: number;
   shipping_fee?: number;
   final_amount: number;
-  order_status: "pending" | "processing" | "shipping" | "completed" | "cancelled";
+  order_status: import("@/lib/order-api").OrderStatus;
+  delivery_incidents?: { reason: string; note: string; at: string }[];
+  refund?: { amount: number; reference: string; note: string; at: string };
   payment_status: OrderPaymentStatus;
-  payment_method: string;
+  payment_method: PaymentMethod;
   transaction_id?: string;
   note?: string;
   created_at: string;
@@ -34,11 +39,26 @@ export type FullAdminOrder = {
 
 export default function OrderInvoiceModal({
   order,
+  request,
   onClose,
 }: {
   order: FullAdminOrder;
+  request: AdminRequest;
   onClose: () => void;
 }) {
+  type Store = { store_name: string; address: string; hotline: string; email: string };
+  const [store, setStore] = useState<Store>();
+  const [error, setError] = useState("");
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    request<Store>("/admin/settings", { signal: controller.signal })
+      .then(data => { if (!controller.signal.aborted) setStore(data); })
+      .catch(() => { if (!controller.signal.aborted) setError("Không tải được thông tin cửa hàng để in phiếu."); });
+    return () => controller.abort();
+  }, [request, revision]);
+  const collectCOD = order.payment_method === "COD" && order.payment_status === "pending"
+    && ["pending", "processing", "shipping"].includes(order.order_status);
   const formatPrice = (value: number) =>
     `${new Intl.NumberFormat("vi-VN").format(value)} đ`;
 
@@ -62,32 +82,32 @@ export default function OrderInvoiceModal({
         className="admin-invoice-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        aria-label="Phiếu đơn hàng"
         aria-modal="true"
       >
         <div className="admin-invoice-actions no-print">
           <button
             type="button"
             className="admin-button print-btn"
-            onClick={handlePrint}
+            onClick={handlePrint} disabled={!store}
           >
-            🖨️ In hóa đơn (A4)
+            In phiếu đơn hàng (A4)
           </button>
           <button type="button" className="admin-close-btn" onClick={onClose}>
             ✕ Đóng
           </button>
         </div>
 
+        {error && <p role="alert" className="admin-alert">{error} <button onClick={() => { setError(""); setRevision(v => v + 1); }}>Thử lại</button></p>}
         <div className="admin-invoice-sheet printable-area">
           <header className="invoice-header">
             <div className="invoice-brand">
-              <h2>F.STYLE STORE</h2>
-              <p>Thời trang hiện đại & Đẳng cấp tối giản</p>
-              <small>Số 68 Đường Cầu Giấy, Quận Cầu Giấy, TP. Hà Nội</small>
-              <br />
-              <small>Hotline: 1900 6868 · Email: support@fstyle.vn</small>
+              <h2>{store?.store_name}</h2>
+              <p>{store?.address}</p>
+              <small>{[store?.hotline, store?.email].filter(Boolean).join(" · ")}</small>
             </div>
             <div className="invoice-meta">
-              <h1>HÓA ĐƠN BÁN HÀNG</h1>
+              <h1>PHIẾU ĐƠN HÀNG</h1>
               <p className="invoice-code">
                 Mã đơn: #{order._id.slice(-8).toUpperCase()}
               </p>
@@ -96,7 +116,7 @@ export default function OrderInvoiceModal({
                 {new Date(order.created_at).toLocaleString("vi-VN")}
               </p>
               <p>
-                PTTT: <strong>{order.payment_method}</strong> ({order.payment_status})
+                PTTT: <strong>{paymentMethodText[order.payment_method]}</strong> ({paymentStatusText[order.payment_status]})
               </p>
             </div>
           </header>
@@ -130,7 +150,7 @@ export default function OrderInvoiceModal({
               <p>
                 <strong>Trạng thái đơn:</strong>{" "}
                 <span className={`status-tag status-${order.order_status}`}>
-                  {order.order_status.toUpperCase()}
+                  {orderStatusText[order.order_status]}
                 </span>
               </p>
               {order.transaction_id && (
@@ -183,13 +203,7 @@ export default function OrderInvoiceModal({
           </section>
 
           <section className="invoice-summary-box">
-            <div className="summary-notes">
-              <p>
-                * Cảm ơn quý khách đã mua sắm tại <strong>F.Style Store</strong>!
-              </p>
-              <p>* Quý khách vui lòng kiểm tra sản phẩm trước khi nhận hàng.</p>
-              <p>* Hỗ trợ đổi trả miễn phí trong vòng 30 ngày với tem mác nguyên vẹn.</p>
-            </div>
+            <div className="summary-notes"><p>Thu hộ khi giao hàng</p><strong>{formatPrice(collectCOD ? finalAmount : 0)}</strong></div>
             <div className="summary-numbers">
               <div className="summary-row">
                 <span>Tạm tính hàng:</span>
@@ -222,7 +236,7 @@ export default function OrderInvoiceModal({
               <small>(Ký và ghi rõ họ tên)</small>
             </div>
             <div className="sig-block">
-              <p>F.Style Store</p>
+              <p>{store?.store_name}</p>
               <small>(Thủ kho xuất hàng)</small>
             </div>
           </footer>

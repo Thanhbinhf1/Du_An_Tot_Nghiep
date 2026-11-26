@@ -7,8 +7,12 @@ export type Outfit = {
   _id: string;
   title: string;
   description?: string;
+  style?: string;
+  occasion?: string;
+  gallery?: string[];
   image: string;
   product_ids: string[];
+  size_guide_product_ids?: string[];
 };
 
 export function useCatalogOutfits() {

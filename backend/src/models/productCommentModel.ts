@@ -6,6 +6,9 @@ export interface IProductComment extends Document {
   user_name: string;
   rating: number;
   comment: string;
+  mask_all: boolean;
+  moderated_by?: mongoose.Types.ObjectId | null;
+  moderated_at?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -17,6 +20,9 @@ const productCommentSchema = new Schema<IProductComment>(
     user_name: { type: String, required: true, trim: true },
     rating: { type: Number, required: true, min: 1, max: 5 },
     comment: { type: String, required: true, trim: true, maxlength: 1000 },
+    mask_all: { type: Boolean, default: false },
+    moderated_by: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    moderated_at: { type: Date, default: null },
   },
   { timestamps: true },
 );

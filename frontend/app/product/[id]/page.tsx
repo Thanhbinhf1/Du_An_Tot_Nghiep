@@ -1,10 +1,11 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import ProductCard from "@/components/product/ProductCard";
 import ProductReviews from "@/components/product/ProductReviews";
+import { ProductSizeGuide } from "@/components/product/SizeChart";
 import { formatVnd } from "@/data/products";
 import { useWishlist } from "@/lib/wishlist";
 import { addCartItem } from "@/lib/cart-api";
@@ -12,6 +13,7 @@ import { useDemoAuth } from "@/lib/demo-auth";
 import { API_BASE_URL, mapApiProduct, readApiResponse, type ApiProduct } from "@/lib/api";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 import { getColorSwatch } from "@/lib/product-colors";
+import { recommendOutfitProducts } from "@/lib/product-recommendations";
 
 import "./product.css";
 
@@ -23,11 +25,11 @@ export default function ProductDetailPage() {
 
 function ProductRoute() {
   const { id } = useParams<{ id: string }>();
-  const color = useSearchParams().get("color") ?? "";
-  return <ProductDetail key={id} id={id} initialColor={color} />;
+  const options = useSearchParams();
+  return <ProductDetail key={id} id={id} initialColor={options.get("color") ?? ""} initialSize={options.get("size") ?? ""} />;
 }
 
-function ProductDetail({ id, initialColor }: { id: string; initialColor: string }) {
+function ProductDetail({ id, initialColor, initialSize }: { id: string; initialColor: string; initialSize: string }) {
   const [product, setProduct] = useState<DetailProduct>();
   const [productError, setProductError] = useState("");
   const [retrySeed, setRetrySeed] = useState(0);
@@ -78,33 +80,34 @@ function ProductDetail({ id, initialColor }: { id: string; initialColor: string 
       </div>
     );
   }
-  return <ProductDetails key={initialColor} product={product} initialColor={initialColor} />;
+  return <ProductDetails key={`${initialColor}:${initialSize}`} product={product} initialColor={initialColor} initialSize={initialSize} />;
 }
 
-function ProductDetails({ product, initialColor }: { product: DetailProduct; initialColor: string }) {
+function ProductDetails({ product, initialColor, initialSize }: { product: DetailProduct; initialColor: string; initialSize: string }) {
   const matchingColors = product.variants.filter((variant) => variant.color === initialColor);
+  const requestedSize = product.variants.filter((variant) =>
+    variant.size.trim().toUpperCase() === initialSize.trim().toUpperCase() && variant.stock_quantity > 0);
   const firstVariant =
+    requestedSize.find((variant) => variant.color === initialColor) ?? requestedSize[0] ??
     matchingColors.find((variant) => variant.stock_quantity > 0) ?? matchingColors[0] ??
     product.variants.find((variant) => variant.stock_quantity > 0) ?? product.variants[0];
   const [selectedColor, setSelectedColor] = useState(firstVariant?.color ?? "");
   const [variantId, setVariantId] = useState(firstVariant?._id ?? "");
   const [quantity, setQuantity] = useState(1);
   const [adding, setAdding] = useState(false);
+  const cartRequest = useRef(false);
   const [added, setAdded] = useState(false);
   const [cartError, setCartError] = useState("");
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [zoomOpen, setZoomOpen] = useState(false);
+  const zoomDialog = useRef<HTMLDialogElement>(null);
   const { token } = useDemoAuth();
   const wishlist = useWishlist();
   const { products } = useCatalogProducts();
 
   useEffect(() => {
-    if (!zoomOpen) return;
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setZoomOpen(false);
-    }
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    const dialog = zoomDialog.current;
+    if (zoomOpen && dialog && !dialog.open) dialog.showModal();
   }, [zoomOpen]);
 
   const colors = [...new Set(product.variants.map((item) => item.color))];
@@ -114,11 +117,11 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
   const stock = variant?.stock_quantity ?? 0;
 
   const productImages = product.images ?? [];
-  const colorImages = productImages.filter((image) => image.color === activeColor);
+  const colorImages = productImages.filter((image) => image.color && image.color.trim().toLocaleLowerCase("vi") === activeColor.trim().toLocaleLowerCase("vi"));
   const unassignedImages = productImages.filter((image) => !image.color);
   const visibleImages = !activeColor
     ? productImages
-    : colorImages.length ? colorImages : unassignedImages;
+    : [...colorImages, ...unassignedImages];
   const galleryImages = [...new Set(visibleImages.map((image) => image.url).filter(Boolean))];
 
   const currentImage = galleryImages[activeImageIndex] ?? "";
@@ -138,13 +141,13 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
     .slice(0, 4);
 
   // Phối đồ (Gợi ý các món đồ kết hợp khác loại hoặc ăn ý)
-  const mixAndMatchProducts = useMemo(() => {
-    const others = products.filter((item) => item.id !== product.id);
-    const differentCategory = others.filter((item) => item.category !== product.category);
-    return (differentCategory.length >= 3 ? differentCategory : others).slice(0, 3);
-  }, [product.category, product.id, products]);
+  const mixAndMatchProducts = useMemo(() => recommendOutfitProducts(product, products), [product, products]);
 
   const favorite = wishlist.ids.includes(product.id);
+  const selection = new URLSearchParams();
+  if (activeColor) selection.set("color", activeColor);
+  if (variant) selection.set("size", variant.size);
+  const returnTo = `/product/${product.id}${selection.size ? `?${selection}` : ""}`;
 
   function selectVariant(id: string) {
     const target = product.variants.find((item) => item._id === id);
@@ -186,8 +189,9 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
       return;
     }
 
-    if (!token || adding || quantity > stock) return;
+    if (!token || cartRequest.current || quantity > stock) return;
 
+    cartRequest.current = true;
     setAdding(true);
     try {
       await addCartItem(variant._id, quantity, token);
@@ -197,6 +201,7 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
         cause instanceof Error ? cause.message : "Không thể thêm sản phẩm vào giỏ hàng.",
       );
     } finally {
+      cartRequest.current = false;
       setAdding(false);
     }
   }
@@ -223,7 +228,11 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
             {galleryImages.length ? (
               galleryImages.map((url, index) => (
                 <button key={url} type="button" className="product-gallery-tile"
-                  onClick={() => { setActiveImageIndex(index); setZoomOpen(true); }}
+                  onClick={(event) => {
+                    event.currentTarget.focus({ preventScroll: true });
+                    setActiveImageIndex(index);
+                    setZoomOpen(true);
+                  }}
                   aria-label={`Phóng to ảnh ${index + 1} của ${product.name}`}>
                   {/* eslint-disable-next-line @next/next/no-img-element -- image URLs are supplied by the catalog */}
                   <img src={url} alt="" loading={index > 1 ? "lazy" : "eager"} />
@@ -278,9 +287,7 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
                   <p className="product-option-label">
                     Kích cỡ {variant ? <strong>({variant.size})</strong> : <span>(Chưa chọn)</span>}
                   </p>
-                  <Link className="size-guide-btn" href={product.categoryId ? `/tu-van-size?categoryId=${encodeURIComponent(product.categoryId)}&productId=${encodeURIComponent(product.id)}` : "/tu-van-size"}>
-                    Tư vấn kích cỡ
-                  </Link>
+                  <ProductSizeGuide id={product.id} name={product.name} activeSize={variant?.size} sizes={product.sizes} />
                 </div>
 
                 <div className="product-size-options" role="group" aria-label="Chọn kích cỡ">
@@ -289,13 +296,14 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
                       key={item._id}
                       type="button"
                       className={`product-size-option${item._id === variantId ? " selected" : ""}${
-                        item.stock_quantity === 0 ? " out-of-stock" : ""
+                        item.stock_quantity <= 0 ? " out-of-stock" : ""
                       }`}
                       aria-pressed={item._id === variantId}
-                      disabled={adding}
+                      disabled={adding || item.stock_quantity <= 0}
                       onClick={() => {
                         if (item._id === variantId) {
                           setVariantId("");
+                          setAdded(false);
                           setCartError("");
                         } else {
                           selectVariant(item._id);
@@ -303,14 +311,14 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
                       }}
                     >
                       {item.size}
-                      {item.stock_quantity === 0 ? " (hết hàng)" : ""}
+                      {item.stock_quantity <= 0 ? " (hết hàng)" : ""}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div className="detail-price-box">
-                <p className="detail-price">
+                <p className={`detail-price${isDiscounted ? " detail-price-sale" : ""}`}>
                   {formatVnd(effectivePrice)}
                   {isDiscounted && <> <del>{formatVnd(originalPrice)}</del></>}
                 </p>
@@ -357,7 +365,7 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
                   {adding ? "Đang thêm..." : variant && stock <= 0 ? "Hết hàng" : "Thêm vào giỏ hàng"}
                 </button>
               ) : (
-                <Link className="pill-button dark" href="/dang-nhap">Đăng nhập để mua hàng</Link>
+                <Link className="pill-button dark" href={`/dang-nhap?returnTo=${encodeURIComponent(returnTo)}`}>Đăng nhập để mua hàng</Link>
               )}
             </div>
             <button
@@ -389,6 +397,8 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
               <p>
                 {product.description || "Chưa có mô tả sản phẩm."}
               </p>
+              {product.material && <p>Chất liệu: {product.material}</p>}
+              {product.careInstructions && <p>Bảo quản: {product.careInstructions}</p>}
             </details>
             <details>
               <summary>Giao hàng / Đổi trả</summary>
@@ -400,6 +410,8 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
             </details>
           </div>
         </section>
+
+        <ProductReviews productId={product.id} />
       </div>
 
       {/* 3. PHỐI ĐỒ: Gợi ý sản phẩm kết hợp (Mix & Match) */}
@@ -421,7 +433,7 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
                   )}
                 </Link>
                 <div className="mix-match-info">
-                  <span className="product-meta">{item.category || "Phối đồ F.Style"}</span>
+                  <span className="product-meta">{item.category || "Phối đồ VSC_BAPD"}</span>
                   <Link href={`/product/${item.id}`}>
                     <strong>{item.name}</strong>
                   </Link>
@@ -436,10 +448,7 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
         </section>
       )}
 
-      {/* 4. ĐÁNH GIÁ SẢN PHẨM */}
-      <ProductReviews productId={product.id} />
-
-      {/* 5. SẢN PHẨM LIÊN QUAN */}
+      {/* 4. SẢN PHẨM LIÊN QUAN */}
       {related.length > 0 && (
         <section className="related-products">
           <h2 className="section-title">Sản phẩm liên quan</h2>
@@ -453,18 +462,20 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
 
       {/* MODAL PHÓNG TO ẢNH (ZOOM LIGHTBOX) */}
       {zoomOpen && currentImage && (
-        <div
+        <dialog
+          ref={zoomDialog}
           className="image-zoom-backdrop"
-          role="dialog"
-          aria-modal="true"
           aria-label="Phóng to hình ảnh sản phẩm"
-          onClick={() => setZoomOpen(false)}
+          onClose={() => setZoomOpen(false)}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) event.currentTarget.close();
+          }}
         >
-          <div className="image-zoom-dialog" onClick={(e) => e.stopPropagation()}>
+          <div className="image-zoom-dialog">
             <button
               type="button"
               className="image-zoom-close"
-              onClick={() => setZoomOpen(false)}
+              onClick={() => zoomDialog.current?.close()}
               aria-label="Đóng phóng to"
             >
               × Đóng
@@ -494,7 +505,7 @@ function ProductDetails({ product, initialColor }: { product: DetailProduct; ini
               </div>
             )}
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   );

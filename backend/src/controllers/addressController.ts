@@ -2,6 +2,7 @@ import type { Response, NextFunction } from "express";
 import mongoose from "mongoose";
 
 import Address from "../models/addressModel.js";
+import User from "../models/userModel.js";
 import { AppError } from "../middlewares/AppError.js";
 import type { AuthRequest } from "../middlewares/authMiddleware.js";
 import { resolveAddressLocation } from "../services/addressLocations.js";
@@ -13,6 +14,12 @@ const addressFields = [
 ] as const;
 
 type AddressField = (typeof addressFields)[number];
+
+// Two first-address inserts must conflict even when no address document exists yet.
+async function lockAddressBook(userId: mongoose.Types.ObjectId, session: mongoose.ClientSession) {
+  const owner = await User.updateOne({ _id: userId }, { $inc: { __v: 1 } }, { session, timestamps: false });
+  if (!owner.matchedCount) throw new AppError("Không tìm thấy tài khoản.", 404);
+}
 
 function getUserId(req: AuthRequest) {
   if (!req.user) {
@@ -108,16 +115,13 @@ export class AddressController {
       const userId = getUserId(req);
       const data = validateAddressFields(req.body, true);
 
-      const hasAddress = await Address.exists({
-        user_id: userId,
-      });
-
-      // Địa chỉ đầu tiên tự động làm mặc định.
-      // Các địa chỉ tiếp theo không tự thay đổi mặc định.
-      const address = await Address.create({
-        ...data,
-        user_id: userId,
-        is_default: !hasAddress,
+      const address = await mongoose.connection.transaction(async (session) => {
+        await lockAddressBook(userId, session);
+        const currentDefault = await Address.exists({ user_id: userId, is_default: true }).session(session);
+        const [created] = await Address.create([{
+          ...data, user_id: userId, is_default: !currentDefault,
+        }], { session });
+        return created;
       });
 
       return res.status(201).json({
@@ -182,27 +186,15 @@ export class AddressController {
       const userId = getUserId(req);
       const addressId = getAddressId(req);
 
-      const address = await Address.findOneAndDelete({
-        _id: addressId,
-        user_id: userId,
-      });
-
-      if (!address) {
-        throw new AppError("Không tìm thấy địa chỉ", 404);
-      }
-
-      // Nếu xóa địa chỉ mặc định,
-      // chọn địa chỉ còn lại làm mặc định.
-      if (address.is_default) {
-        const replacement = await Address.findOne({
-          user_id: userId,
-        }).sort({ created_at: -1 });
-
-        if (replacement) {
-          replacement.is_default = true;
-          await replacement.save();
+      await mongoose.connection.transaction(async (session) => {
+        await lockAddressBook(userId, session);
+        const address = await Address.findOneAndDelete({ _id: addressId, user_id: userId }, { session });
+        if (!address) throw new AppError("Không tìm thấy địa chỉ", 404);
+        if (address.is_default) {
+          await Address.findOneAndUpdate({ user_id: userId }, { $set: { is_default: true } },
+            { session, sort: { is_default: -1, created_at: -1, _id: -1 } });
         }
-      }
+      });
 
       return res.status(200).json({
         status: "success",
@@ -223,22 +215,21 @@ export class AddressController {
       const userId = getUserId(req);
       const addressId = getAddressId(req);
 
-      const address = await Address.findOne({
-        _id: addressId,
-        user_id: userId,
+      const address = await mongoose.connection.transaction(async (session) => {
+        await lockAddressBook(userId, session);
+        const selected = await Address.findOneAndUpdate(
+          { _id: addressId, user_id: userId },
+          { $set: { is_default: true } },
+          { session, returnDocument: "after" },
+        );
+        if (!selected) throw new AppError("Không tìm thấy địa chỉ", 404);
+        await Address.updateMany(
+          { _id: { $ne: addressId }, user_id: userId, is_default: true },
+          { $set: { is_default: false } },
+          { session },
+        );
+        return selected;
       });
-
-      if (!address) {
-        throw new AppError("Không tìm thấy địa chỉ", 404);
-      }
-
-      await Address.updateMany(
-        { user_id: userId },
-        { $set: { is_default: false } },
-      );
-
-      address.is_default = true;
-      await address.save();
 
       return res.status(200).json({
         status: "success",

@@ -1,3 +1,4 @@
+import { legacyBundle, saveLegacyBundle } from "../services/catalogLegacyAdapter.js";
 import type { Request, Response, NextFunction } from "express";
 import mongoose from "mongoose";
 import ProductImage from "../models/productImageModel.js";
@@ -58,138 +59,37 @@ export class ProductImageController {
     }
   }
 
-  // 3. Thêm ảnh
   static async createImage(req: Request, res: Response, next: NextFunction) {
     try {
-      const productId = getValidId(req.params.productId, "ID sản phẩm");
-      const { image_url, color, display_order, is_primary = false } = req.body;
-
-      const product = await Product.findById(productId);
-      if (!product) throw new AppError("Không tìm thấy sản phẩm", 404);
-
-      if (typeof image_url !== "string" || !image_url.trim()) {
-        throw new AppError("Đường dẫn ảnh không hợp lệ", 400);
-      }
-
-      if (!Number.isInteger(display_order) || display_order < 1) {
-        throw new AppError("Thứ tự hiển thị phải là số nguyên >= 1", 400);
-      }
-
-      if (typeof is_primary !== "boolean") {
-        throw new AppError("is_primary phải là boolean", 400);
-      }
-
-      if (color !== undefined && typeof color !== "string") {
-        throw new AppError("Màu ảnh không hợp lệ", 400);
-      }
-
-      if (is_primary) {
-        await ProductImage.updateMany(
-          { product_id: productId },
-          { $set: { is_primary: false } },
-        );
-      }
-
-      const image = await ProductImage.create({
-        product_id: productId,
-        image_url,
-        ...(typeof color === "string" && color.trim() ? { color: color.trim() } : {}),
-        display_order,
-        is_primary,
-      });
-
-      res.status(201).json({
-        status: "success",
-        data: image,
-      });
-    } catch (error) {
-      next(error);
-    }
+      const id = String(getValidId(req.params.productId, "ID sản phẩm")), bundle = await legacyBundle(id);
+      const { image_url, color, is_primary, display_order } = req.body;
+      if (!Number.isInteger(display_order) || display_order < 1) throw new AppError("Thứ tự ảnh phải là số nguyên >=1.",400);
+      const primary = is_primary === true || !bundle.images.length;
+      if (primary) bundle.images.forEach(row => row.is_primary = false);
+      bundle.images.splice(Math.min(display_order-1,bundle.images.length),0,{image_url,color,is_primary:primary});
+      const state = await saveLegacyBundle(req,id,bundle);
+      res.status(201).json({data:state.images.find(row=>row.image_url===image_url)});
+    } catch(error){next(error);}
   }
-
-  // 4. Cập nhật ảnh
   static async updateImage(req: Request, res: Response, next: NextFunction) {
     try {
-      const productId = getValidId(req.params.productId, "ID sản phẩm");
-      const imageId = getValidId(req.params.imageId, "ID ảnh");
-
-      const image = await ProductImage.findOne({
-        _id: imageId,
-        product_id: productId,
-      });
-
-      if (!image) throw new AppError("Không tìm thấy ảnh", 404);
-
-      const { image_url, color, display_order, is_primary } = req.body;
-
-      if (image_url !== undefined) {
-        if (typeof image_url !== "string" || !image_url.trim()) {
-          throw new AppError("Đường dẫn ảnh không hợp lệ", 400);
-        }
-        image.image_url = image_url.trim();
-      }
-
-      if (color !== undefined) {
-        if (typeof color !== "string") {
-          throw new AppError("Màu ảnh không hợp lệ", 400);
-        }
-        const normalizedColor = color.trim();
-        if (normalizedColor) image.color = normalizedColor;
-        else image.set("color", undefined);
-      }
-
-      if (display_order !== undefined) {
-        if (!Number.isInteger(display_order) || display_order < 1) {
-          throw new AppError("Thứ tự hiển thị phải là số nguyên >= 1", 400);
-        }
-        image.display_order = display_order;
-      }
-
-      if (is_primary !== undefined) {
-        if (typeof is_primary !== "boolean") {
-          throw new AppError("is_primary phải là boolean", 400);
-        }
-
-        if (is_primary) {
-          await ProductImage.updateMany(
-            { product_id: productId, _id: { $ne: imageId } },
-            { $set: { is_primary: false } },
-          );
-        }
-
-        image.is_primary = is_primary;
-      }
-
-      await image.save();
-
-      res.status(200).json({
-        status: "success",
-        data: image,
-      });
-    } catch (error) {
-      next(error);
-    }
+      const id = String(getValidId(req.params.productId,"ID sản phẩm")), imageId=String(getValidId(req.params.imageId,"ID ảnh")), bundle=await legacyBundle(id);
+      const index=bundle.images.findIndex(row=>row._id===imageId), image=bundle.images[index];
+      if(!image)throw new AppError("Không tìm thấy ảnh.",404);
+      const {image_url,color,is_primary,display_order}=req.body;
+      if(image_url!==undefined)image.image_url=image_url;
+      if(color!==undefined)image.color=color;
+      if(is_primary!==undefined){if(typeof is_primary!=="boolean")throw new AppError("Trạng thái ảnh chính phải là boolean.",400);if(is_primary)bundle.images.forEach(row=>row.is_primary=false);image.is_primary=is_primary;}
+      if(display_order!==undefined){if(!Number.isInteger(display_order)||display_order<1)throw new AppError("Thứ tự ảnh không hợp lệ.",400);bundle.images.splice(index,1);bundle.images.splice(Math.min(display_order-1,bundle.images.length),0,image);}
+      const state=await saveLegacyBundle(req,id,bundle);res.json({data:state.images.find(row=>String(row._id)===imageId)});
+    } catch(error){next(error);}
   }
-
-  // 5. Xóa ảnh
   static async deleteImage(req: Request, res: Response, next: NextFunction) {
     try {
-      const productId = getValidId(req.params.productId, "ID sản phẩm");
-      const imageId = getValidId(req.params.imageId, "ID ảnh");
-
-      const image = await ProductImage.findOneAndDelete({
-        _id: imageId,
-        product_id: productId,
-      });
-
-      if (!image) throw new AppError("Không tìm thấy ảnh", 404);
-
-      res.status(200).json({
-        status: "success",
-        message: "Xóa ảnh thành công",
-      });
-    } catch (error) {
-      next(error);
-    }
+      const id=String(getValidId(req.params.productId,"ID sản phẩm")),imageId=String(getValidId(req.params.imageId,"ID ảnh")),bundle=await legacyBundle(id);
+      const image=bundle.images.find(row=>row._id===imageId);if(!image)throw new AppError("Không tìm thấy ảnh.",404);
+      bundle.images=bundle.images.filter(row=>row._id!==imageId);if(image.is_primary&&bundle.images.length)bundle.images[0]!.is_primary=true;
+      await saveLegacyBundle(req,id,bundle);res.json({status:"success",message:"Đã bỏ ảnh khỏi sản phẩm; giữ tệp gốc."});
+    } catch(error){next(error);}
   }
 }

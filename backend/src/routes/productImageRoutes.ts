@@ -1,8 +1,10 @@
 import { Router } from "express";
+import { normalizeRequestBody } from "../middlewares/requestBodyMiddleware.js";
 import { protect, type AuthRequest } from "../middlewares/authMiddleware.js";
 import { ProductImageController } from "../controllers/productImageController.js";
 
 const router = Router({ mergeParams: true });
+router.use(normalizeRequestBody);
 
 const requireAdmin = (
   req: AuthRequest,

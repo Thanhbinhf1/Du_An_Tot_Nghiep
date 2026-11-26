@@ -2,7 +2,7 @@ import mongoose, { Document, Schema, Types } from "mongoose";
 
 export interface IOrderStatusHistory extends Document {
   order_id: Types.ObjectId;
-  status: "pending" | "processing" | "shipping" | "completed" | "cancelled";
+  status: "pending" | "processing" | "shipping" | "delivery_failed" | "returning" | "returned" | "completed" | "cancelled";
   note: string;
   changed_by?: Types.ObjectId;
   created_at: Date;
@@ -13,7 +13,7 @@ const orderStatusHistorySchema = new Schema<IOrderStatusHistory>(
     order_id: { type: Schema.Types.ObjectId, ref: "Order", required: true },
     status: {
       type: String,
-      enum: ["pending", "processing", "shipping", "completed", "cancelled"],
+      enum: ["pending", "processing", "shipping", "delivery_failed", "returning", "returned", "completed", "cancelled"],
       required: true,
     },
     note: { type: String, default: "" },

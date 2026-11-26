@@ -55,7 +55,7 @@ export default function DangKyPage() {
     <AuthShell>
       <h1 className={styles.title}>Tạo tài khoản</h1>
       <p className={styles.subtitle}>
-        Lưu sản phẩm yêu thích và theo dõi đơn hàng với tài khoản F.Style.
+        Lưu sản phẩm yêu thích và theo dõi đơn hàng với tài khoản VSC_BAPD.
       </p>
 
       <form onSubmit={handleRegister}>
@@ -150,7 +150,7 @@ export default function DangKyPage() {
               <Link className={styles.textLink} href="/privacy">
                 Chính sách bảo mật
               </Link>{" "}
-              của F.Style.
+              của VSC_BAPD.
             </span>
           </label>
         </div>

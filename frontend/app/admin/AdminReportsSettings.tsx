@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { getAddressLocations, type LocationOption } from "@/lib/address-api";
 import type { AdminRequest } from "./ProductVariantsManager";
 
 type StoreConfig = {
@@ -15,6 +16,8 @@ type StoreConfig = {
   free_shipping_threshold: number;
   standard_shipping_fee: number;
   express_shipping_fee: number;
+  express_shipping_province_code?: number | null;
+  express_shipping_ward_codes?: number[];
 };
 
 export default function AdminReportsSettings({
@@ -25,12 +28,16 @@ export default function AdminReportsSettings({
   currentUserRole?: string;
 }) {
   const [config, setConfig] = useState<StoreConfig>();
+  const [provinces, setProvinces] = useState<LocationOption[]>([]);
+  const [provinceError, setProvinceError] = useState("");
+  const [wardResult, setWardResult] = useState<{ province: number; wards: LocationOption[]; error?: string }>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   const isAdmin = currentUserRole === "admin";
+  const expressProvince = config?.express_shipping_province_code;
 
   useEffect(() => {
     let active = true;
@@ -52,6 +59,25 @@ export default function AdminReportsSettings({
     };
   }, [request]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    getAddressLocations(undefined, controller.signal).then(setProvinces).catch(() => {
+      if (!controller.signal.aborted) setProvinceError("Không thể tải danh sách tỉnh/thành.");
+    });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!expressProvince) return;
+    const controller = new AbortController();
+    getAddressLocations(String(expressProvince), controller.signal).then((wards) => {
+      if (!controller.signal.aborted) setWardResult({ province: expressProvince, wards });
+    }).catch(() => {
+      if (!controller.signal.aborted) setWardResult({ province: expressProvince, wards: [], error: "Không thể tải danh sách phường, xã." });
+    });
+    return () => controller.abort();
+  }, [expressProvince]);
+
   const handleSaveSettings = async (e: FormEvent) => {
     e.preventDefault();
     if (!config || !isAdmin || busy) return;
@@ -63,7 +89,7 @@ export default function AdminReportsSettings({
         method: "PUT",
         body: JSON.stringify(config),
       });
-      setSuccess("Đã lưu thông tin cấu hình F.Style Store thành công.");
+      setSuccess("Đã lưu cấu hình cửa hàng.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không thể lưu cấu hình.");
     } finally {
@@ -77,7 +103,7 @@ export default function AdminReportsSettings({
       <div className="admin-panel">
         <div className="admin-panel-heading">
           <div>
-            <h2>Cấu hình thông tin cửa hàng F.Style Store</h2>
+            <h2>Thông tin cửa hàng</h2>
             <p className="admin-muted">
               Cập nhật thông tin liên hệ trên cửa hàng, thông tin in hóa đơn và phí giao hàng ở checkout.
             </p>
@@ -188,6 +214,36 @@ export default function AdminReportsSettings({
           </label>
 
           <label>
+            Tỉnh/thành hỗ trợ giao hỏa tốc
+            <select
+              disabled={!isAdmin || busy || !provinces.length}
+              value={config.express_shipping_province_code ?? ""}
+              onChange={(e) => setConfig({ ...config, express_shipping_province_code: e.target.value ? Number(e.target.value) : null, express_shipping_ward_codes: [] })}
+            >
+              <option value="">Tắt giao hỏa tốc</option>
+              {provinces.map(({ code, name }) => <option key={code} value={code}>{name}</option>)}
+            </select>
+            {provinceError && <span role="alert">{provinceError}</span>}
+          </label>
+
+          {expressProvince && <fieldset className="wide" disabled={!isAdmin || busy}>
+            <legend>Phường, xã được phục vụ hỏa tốc</legend>
+            <p className="admin-muted">Chọn những nơi đã xác nhận có thể giao. Để trống danh sách sẽ tắt hỏa tốc.</p>
+            {wardResult?.province !== expressProvince ? <p role="status">Đang tải địa bàn…</p> : wardResult.error ? <p role="alert">{wardResult.error}</p> : (
+              <div style={{ maxHeight: 190, overflowY: "auto" }}>
+                {wardResult.wards.map(({ code, name }) => {
+                  const codes = config.express_shipping_ward_codes ?? [];
+                  return <label key={code} style={{ display: "flex", alignItems: "center", gap: 8, padding: 5 }}>
+                    <input type="checkbox" checked={codes.includes(code)} onChange={(event) => setConfig({
+                      ...config, express_shipping_ward_codes: event.target.checked ? [...codes, code] : codes.filter((value) => value !== code),
+                    })} style={{ width: "auto", minHeight: "auto" }} /> {name}
+                  </label>;
+                })}
+              </div>
+            )}
+          </fieldset>}
+
+          <label>
             Phí giao hàng hỏa tốc (VND)
             <input
               type="number"
@@ -211,80 +267,6 @@ export default function AdminReportsSettings({
         </form>}
       </div>
 
-      {/* 2. STAFF PERMISSIONS MATRIX */}
-      <div className="admin-panel" style={{ marginTop: "24px" }}>
-        <div className="admin-panel-heading">
-          <div>
-            <h2>🛡️ Ma trận phân quyền hệ thống (Admin vs Staff)</h2>
-            <p className="admin-muted">
-              Đảm bảo an toàn dữ liệu, tính minh bạch và bảo mật thông tin khách hàng.
-            </p>
-          </div>
-        </div>
-
-        <div className="admin-table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Phân hệ nghiệp vụ</th>
-                <th>Mô tả chức năng</th>
-                <th style={{ textAlign: "center" }}>Nhân viên (Staff)</th>
-                <th style={{ textAlign: "center" }}>Quản trị viên (Admin)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Dashboard & Thống kê</strong></td>
-                <td>Xem doanh số, biểu đồ doanh thu, top sản phẩm, cảnh báo tồn kho</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Toàn quyền xem</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Toàn quyền xem</td>
-              </tr>
-              <tr>
-                <td><strong>Sản phẩm & Biến thể</strong></td>
-                <td>Thêm, sửa mô tả, hình ảnh, cập nhật giá, trạng thái đang bán</td>
-                <td style={{ textAlign: "center" }}>Chỉ quản trị viên</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Toàn quyền</td>
-              </tr>
-              <tr>
-                <td><strong>Quản lý tồn kho</strong></td>
-                <td>Điều chỉnh số lượng kho hàng, theo dõi SKU sắp hết</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Cập nhật tồn kho</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Toàn quyền</td>
-              </tr>
-              <tr>
-                <td><strong>Quản lý đơn hàng</strong></td>
-                <td>Duyệt đơn, chuyển trạng thái giao hàng, in hóa đơn xuất kho, hủy đơn</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Xử lý & In phiếu</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Toàn quyền</td>
-              </tr>
-              <tr>
-                <td><strong>Quản lý thanh toán</strong></td>
-                <td>Xác nhận chuyển khoản, đối soát VNPay, tra cứu mã giao dịch</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>👁️ Tra cứu giao dịch</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Toàn quyền</td>
-              </tr>
-              <tr>
-                <td><strong>Khách hàng & Phân quyền</strong></td>
-                <td>Xem lịch sử mua hàng, nâng/hạ quyền admin/staff, khóa tài khoản</td>
-                <td style={{ textAlign: "center", color: "#f59e0b" }}>👁️ Chỉ xem (Không đổi quyền)</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Đổi vai trò & Khóa</td>
-              </tr>
-              <tr>
-                <td><strong>Mã giảm giá (Coupons)</strong></td>
-                <td>Tạo mới, sửa điều kiện, xóa bỏ chiến dịch khuyến mãi</td>
-                <td style={{ textAlign: "center", color: "#f59e0b" }}>⚠️ Tạo & sửa (Không xóa)</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Toàn quyền (Xóa mã)</td>
-              </tr>
-              <tr>
-                <td><strong>Cấu hình cửa hàng</strong></td>
-                <td>Tên cửa hàng, hotline, địa chỉ và phí vận chuyển</td>
-                <td style={{ textAlign: "center", color: "#ef4444" }}>❌ Không thể sửa</td>
-                <td style={{ textAlign: "center", color: "#10b981" }}>✅ Toàn quyền cập nhật</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 }

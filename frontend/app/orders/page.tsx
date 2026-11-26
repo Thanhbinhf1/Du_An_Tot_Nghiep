@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { useDemoAuth } from "@/lib/demo-auth";
+import CancelOrderButton from "@/components/orders/CancelOrderButton";
 import {
   getMyBackendOrders,
-  cancelBackendOrder,
   orderStatusText,
   paymentStatusText,
   paymentMethodText,
@@ -21,69 +21,79 @@ const orderTabs: { id: "all" | OrderStatus; label: string }[] = [
   { id: "pending", label: "Chờ xác nhận" },
   { id: "processing", label: "Đang chuẩn bị" },
   { id: "shipping", label: "Đang giao" },
+  { id: "delivery_failed", label: "Giao thất bại" },
+  { id: "returning", label: "Đang hoàn về" },
+  { id: "returned", label: "Đã hoàn hàng" },
   { id: "completed", label: "Hoàn thành" },
   { id: "cancelled", label: "Đã hủy" },
 ];
 
 export default function BackendOrdersPage() {
   const { token, isHydrated } = useDemoAuth();
+  if (!isHydrated) {
+    return <section className="container" style={{ padding: "40px 0" }}><p role="status">Đang kiểm tra đăng nhập...</p></section>;
+  }
+  if (!token) {
+    return <section className="container checkout-empty" style={{ padding: "40px 0" }}>
+      <h1 className="page-title">Đơn hàng của tôi</h1>
+      <p>Vui lòng đăng nhập để xem lịch sử đơn hàng của bạn.</p>
+      <Link href="/dang-nhap" className="pill-button dark">Đăng nhập ngay</Link>
+    </section>;
+  }
+  return <AccountOrders key={token} token={token} />;
+}
 
+function AccountOrders({ token }: { token: string }) {
+  const mounted = useRef(false);
   const [orders, setOrders] = useState<BackendOrder[]>([]);
   const [activeTab, setActiveTab] = useState<"all" | OrderStatus>("all");
   const [loadedToken, setLoadedToken] = useState("");
   const [error, setError] = useState("");
   const [paymentError, setPaymentError] = useState("");
   const [payingOrder, setPayingOrder] = useState("");
-  const [cancellingOrder, setCancellingOrder] = useState("");
   const [cancelSuccess, setCancelSuccess] = useState("");
 
-  const loadOrders = useCallback(() => {
+  const loadOrders = useCallback((signal?: AbortSignal) => {
     if (!token) return;
-    getMyBackendOrders(token)
+    getMyBackendOrders(token, signal)
       .then((data) => {
+        if (signal?.aborted) return;
         setOrders(data);
         setLoadedToken(token);
         setError("");
       })
       .catch((cause: unknown) => {
+        if (signal?.aborted) return;
         setLoadedToken(token);
         setError(cause instanceof Error ? cause.message : "Không thể tải đơn hàng.");
       });
   }, [token]);
 
   useEffect(() => {
-    if (!isHydrated || !token) return;
-    loadOrders();
-  }, [token, isHydrated, loadOrders]);
+    mounted.current = true;
+    const controller = new AbortController();
+    loadOrders(controller.signal);
+    return () => { mounted.current = false; controller.abort(); };
+  }, [loadOrders]);
 
   async function resumePayment(order: BackendOrder) {
     if (!token || payingOrder) return;
     setPayingOrder(order._id);
     setPaymentError("");
     try {
-      window.location.assign(await createOnlineCheckout(order._id, order.payment_method, token));
+      const destination = await createOnlineCheckout(order._id, order.payment_method, token);
+      if (mounted.current) window.location.assign(destination);
     } catch (cause) {
+      if (!mounted.current) return;
       setPaymentError(cause instanceof Error ? cause.message : "Không thể mở cổng thanh toán.");
       setPayingOrder("");
     }
   }
 
-  async function handleCancelOrder(orderId: string) {
-    if (!token || cancellingOrder) return;
-    if (!window.confirm("Bạn có chắc chắn muốn hủy đơn hàng này không?")) return;
-
-    setCancellingOrder(orderId);
-    setError("");
-    setCancelSuccess("");
-    try {
-      await cancelBackendOrder(orderId, token);
-      setCancelSuccess("Đã hủy đơn hàng thành công và hoàn trả số lượng vào kho.");
-      loadOrders();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Không thể hủy đơn hàng.");
-    } finally {
-      setCancellingOrder("");
-    }
+  function handleCancelled() {
+    if (!mounted.current) return;
+    setCancelSuccess("Đã hủy đơn hàng thành công.");
+    loadOrders();
   }
 
   const filteredOrders = useMemo(() => {
@@ -91,30 +101,10 @@ export default function BackendOrdersPage() {
     return orders.filter((o) => o.order_status === activeTab);
   }, [orders, activeTab]);
 
-  if (!isHydrated) {
-    return (
-      <section className="container" style={{ padding: "40px 0" }}>
-        <p role="status">Đang kiểm tra đăng nhập...</p>
-      </section>
-    );
-  }
-
-  if (!token) {
-    return (
-      <section className="container checkout-empty" style={{ padding: "40px 0" }}>
-        <h1 className="page-title">Đơn hàng của tôi</h1>
-        <p>Vui lòng đăng nhập để xem lịch sử đơn hàng của bạn.</p>
-        <Link href="/dang-nhap" className="pill-button dark">
-          Đăng nhập ngay
-        </Link>
-      </section>
-    );
-  }
-
   const loading = loadedToken !== token;
 
   return (
-    <section className="container" style={{ paddingTop: 28, paddingBottom: 64 }}>
+    <section className="container store-orders" style={{ paddingTop: 28, paddingBottom: 64 }}>
       <div className="breadcrumb" style={{ marginBottom: 12 }}>
         <Link href="/">Trang chủ</Link> / <Link href="/profile">Tài khoản</Link> / <span>Đơn hàng</span>
       </div>
@@ -178,11 +168,11 @@ export default function BackendOrdersPage() {
           <h2>Chưa có đơn hàng nào</h2>
           <p>
             {activeTab === "all"
-              ? "Bạn chưa đặt đơn hàng nào trên F.Style. Hãy khám phá bộ sưu tập mới nhé!"
+              ? "Bạn chưa đặt đơn hàng nào trên VSC_BAPD. Hãy khám phá bộ sưu tập mới nhé!"
               : `Hiện không có đơn hàng nào ở trạng thái "${orderStatusText[activeTab as OrderStatus]}".`}
           </p>
           <Link className="pill-button dark" href="/products" style={{ marginTop: 12 }}>
-            Khám phá sản phẩm F.Style
+            Khám phá sản phẩm VSC_BAPD
           </Link>
         </div>
       )}
@@ -190,12 +180,8 @@ export default function BackendOrdersPage() {
       {!loading && !error && filteredOrders.length > 0 && (
         <div style={{ display: "grid", gap: 18 }}>
           {filteredOrders.map((order) => {
-            const canContinuePayment =
-              order.order_status === "pending" && order.payment_status === "pending";
-            const canCancel =
-              order.order_status === "pending" &&
-              order.payment_method === "COD" &&
-              order.payment_status === "pending";
+            const canContinuePayment = order.actions?.pay;
+            const canCancel = order.actions?.cancel;
             const isCompleted = order.order_status === "completed";
             const createdDate = order.created_at || order.createdAt;
 
@@ -307,7 +293,7 @@ export default function BackendOrdersPage() {
                     </Link>
 
                     {/* Kiểm tra thanh toán */}
-                    {order.payment_method !== "COD" && (
+                    {["SePay", "MoMo", "BankTransfer"].includes(order.payment_method) && (
                       <Link
                         className="pill-button small-pill"
                         href={`/payment/result?orderId=${encodeURIComponent(order._id)}`}
@@ -326,9 +312,7 @@ export default function BackendOrdersPage() {
                       </Link>
                     )}
 
-                    {/* Tiếp tục thanh toán MoMo / VNPay */}
-                    {canContinuePayment &&
-                      (order.payment_method === "MoMo" || order.payment_method === "VNPay") && (
+                    {canContinuePayment && order.payment_method !== "BankTransfer" && (
                         <button
                           type="button"
                           className="pill-button dark small-pill"
@@ -341,15 +325,7 @@ export default function BackendOrdersPage() {
 
                     {/* Hủy đơn hàng */}
                     {canCancel && (
-                      <button
-                        type="button"
-                        className="pill-button small-pill"
-                        disabled={cancellingOrder === order._id}
-                        onClick={() => void handleCancelOrder(order._id)}
-                        style={{ color: "#b42318", borderColor: "#fecaca" }}
-                      >
-                        {cancellingOrder === order._id ? "Đang hủy..." : "Hủy đơn hàng"}
-                      </button>
+                      <CancelOrderButton orderId={order._id} token={token} onCancelled={handleCancelled} />
                     )}
 
                     {/* Đánh giá sản phẩm khi đơn hoàn thành */}

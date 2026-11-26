@@ -1,25 +1,44 @@
+"use client";
+
+import Image from "next/image";
 import Link from "next/link";
+import { STORE_LOGO, STORE_NAME } from "@/lib/store-brand";
+import { useStoreInfo } from "@/lib/useStoreInfo";
 
 export default function Footer() {
+  const store = useStoreInfo();
   return (
     <footer className="footer">
       <div className="footer-columns">
         <section>
-          <strong>Giới thiệu VSC_BAPD</strong>
+          <Link href="/" className="footer-brand" aria-label={`Trang chủ ${STORE_NAME}`}>
+            <Image src={STORE_LOGO} alt="" width={80} height={80} />
+            <strong aria-hidden="true">{STORE_NAME}</strong>
+          </Link>
           <p className="footer-about-text">
-            VSC_BAPD là thương hiệu thời trang hiện đại mang đến các thiết kế tối giản,
-            chất liệu thoải mái và dễ dàng phối đồ cho Nam, Nữ và Trẻ em mỗi ngày.
+            Thời trang dễ mặc, dễ phối cho cả gia đình.
           </p>
+          <div className="footer-social-links">
+            <a href="https://www.facebook.com/share/1Dc9YM3Mi7/?mibextid=wwXIfr" target="_blank" rel="noreferrer" aria-label={`Facebook ${STORE_NAME}`}>
+              Facebook ↗
+            </a>
+          </div>
+        </section>
+
+        <section>
+          <h2>Mua sắm</h2>
           <div className="footer-links">
             <Link href="/products">Tất cả sản phẩm</Link>
             <Link href="/search">Tìm kiếm</Link>
             <Link href="/wishlist">Yêu thích</Link>
             <Link href="/cart">Giỏ hàng</Link>
+            <Link href="/outfit">Mix &amp; Match</Link>
+            <Link href="/tu-van-size">Tư vấn chọn size</Link>
           </div>
         </section>
 
         <section>
-          <strong>Chính sách & Hỗ trợ</strong>
+          <h2>Chính sách &amp; hỗ trợ</h2>
           <div className="footer-links">
             <Link href="/shipping">Chính sách giao hàng</Link>
             <Link href="/returns">Chính sách đổi & trả hàng</Link>
@@ -30,40 +49,19 @@ export default function Footer() {
         </section>
 
         <section>
-          <strong>Tài khoản & Liên hệ</strong>
+          <h2>Tài khoản &amp; liên hệ</h2>
           <div className="footer-links">
             <Link href="/profile">Hồ sơ cá nhân</Link>
             <Link href="/profile/address">Sổ địa chỉ</Link>
             <Link href="/orders">Theo dõi đơn hàng</Link>
             <Link href="/contact">Liên hệ cửa hàng</Link>
-            <span>Hotline: 1900 6868 (8:00 – 22:00)</span>
-            <span>Email: cskh@fstyle.vn</span>
-          </div>
-        </section>
-
-        <section>
-          <strong>Kết nối mạng xã hội</strong>
-          <p className="footer-about-text">
-            Theo dõi VSC_BAPD để cập nhật bộ sưu tập mới và ưu đãi độc quyền mỗi tuần.
-          </p>
-          <div className="footer-social-links" aria-label="Mạng xã hội VSC_BAPD">
-            <a href="https://www.facebook.com/share/1Dc9YM3Mi7/?mibextid=wwXIfr" target="_blank" rel="noreferrer" aria-label="Facebook VSC_BAPD">
-              Facebook
-            </a>
-            <a href="https://www.facebook.com/share/1Dc9YM3Mi7/?mibextid=wwXIfr" target="_blank" rel="noreferrer" aria-label="Instagram VSC_BAPD">
-              Instagram
-            </a>
-            <a href="https://www.facebook.com/share/1Dc9YM3Mi7/?mibextid=wwXIfr" target="_blank" rel="noreferrer" aria-label="TikTok VSC_BAPD">
-              TikTok
-            </a>
-            <a href="https://www.facebook.com/share/1Dc9YM3Mi7/?mibextid=wwXIfr" target="_blank" rel="noreferrer" aria-label="YouTube VSC_BAPD">
-              YouTube
-            </a>
+            {store?.hotline && <a href={`tel:${store.hotline.replace(/[^\d+]/g, "")}`}>{store.hotline}</a>}
+            {store?.email && <a href={`mailto:${store.email}`}>{store.email}</a>}
           </div>
         </section>
       </div>
       <div className="footer-bottom">
-        <p className="footer-copy">© 2026 VSC_BAPD Store — Mặc đẹp mỗi ngày. Bảo lưu mọi quyền.</p>
+        <p className="footer-copy">© 2026 {STORE_NAME}</p>
       </div>
     </footer>
   );

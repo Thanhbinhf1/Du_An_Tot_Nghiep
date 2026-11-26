@@ -1,9 +1,13 @@
+import { lockCategoryTree } from "../services/catalogMutation.js";
+import { assertCategoryReference } from "../services/categoryPolicy.js";
 import type { Request, Response, NextFunction } from "express";
 import mongoose from "mongoose";
 import Category from "../models/categoryModel.js";
 import Product from "../models/productModel.js";
 import StorefrontProduct from "../models/storefrontProductModel.js";
 import ProductVariant from "../models/productVariantModel.js";
+import ProductImage from "../models/productImageModel.js";
+import InventoryMovement from "../models/inventoryMovementModel.js";
 import Order from "../models/orderModel.js";
 import OrderDetail from "../models/orderDetailModel.js";
 import OrderStatusHistory from "../models/orderStatusHistoryModel.js";
@@ -13,14 +17,22 @@ import Payment from "../models/paymentModel.js";
 import ProductComment from "../models/productCommentModel.js";
 import Outfit from "../models/outfitModel.js";
 import OutfitDetail from "../models/outfitDetailModel.js";
-import SizeRecommendation from "../models/sizeRecommendationModel.js";
+import SizeRecommendation, { ProductSizeChart, bodyFields } from "../models/sizeRecommendationModel.js";
+import { readChartRow } from "../services/sizeGuide.js";
+import { isImageUrl } from "../services/catalogValidation.js";
 import Setting from "../models/settingModel.js";
 import { AppError } from "../middlewares/AppError.js";
 import type { AuthRequest } from "../middlewares/authMiddleware.js";
 import { restoreCouponUse, SHIPPING_DEFAULTS } from "../services/checkoutPricing.js";
-import { isPaymentMethodConfigured } from "../config/paymentMethods.js";
+import { getProvince } from "../services/addressLocations.js";
+import { isPaymentMethodConfigured, isStoredPaymentMethod } from "../config/paymentMethods.js";
 import { getBankConfig } from "../config/bankConfig.js";
 import { STORE_INFO_DEFAULTS } from "../config/storeInfo.js";
+import { restoreOrderStock } from "../services/orderStock.js";
+import { literalSearch, paginationMetadata, readPagination } from "../services/listQuery.js";
+import { deliveredSales, stockAdvice } from "../services/adminAnalytics.js";
+import { reviewWords, moderatedReview } from "../services/reviewModeration.js";
+import { orderQueueFilter } from "../services/adminOrderQueues.js";
 
 function requiredText(value: unknown, label: string) {
   if (typeof value !== "string" || !value.trim()) {
@@ -40,7 +52,7 @@ function categorySlug(name: string) {
     .replace(/^-|-$/g, "");
 }
 
-async function productInput(body: Record<string, unknown>) {
+async function productInput(body: Record<string, unknown>, session: mongoose.ClientSession) {
   const name = requiredText(body.name, "Tên sản phẩm");
   const code = requiredText(body.code, "Mã sản phẩm");
   const color = requiredText(body.color, "Màu sắc");
@@ -56,10 +68,8 @@ async function productInput(body: Record<string, unknown>) {
   if (!mongoose.isValidObjectId(categoryId)) {
     throw new AppError("Danh mục không hợp lệ.", 400);
   }
-  if (!await Category.exists({ _id: categoryId })) {
-    throw new AppError("Danh mục không tồn tại.", 404);
-  }
-  if (!Number.isFinite(price) || price < 0) {
+  await assertCategoryReference(categoryId,session);
+  if (!Number.isSafeInteger(price) || price < 0) {
     throw new AppError("Giá sản phẩm phải là số không âm.", 400);
   }
   if (!sizes.length) {
@@ -72,6 +82,8 @@ async function productInput(body: Record<string, unknown>) {
 const DEFAULT_STORE_SETTINGS = {
   ...STORE_INFO_DEFAULTS,
   ...SHIPPING_DEFAULTS,
+  express_shipping_province_code: null,
+  express_shipping_ward_codes: [] as number[],
 };
 
 export class AdminController {
@@ -88,241 +100,119 @@ export class AdminController {
     }
   }
 
-  static async updateUserStatus(req: Request, res: Response, next: NextFunction) {
-    try {
-      if (!mongoose.isValidObjectId(req.params.id)) {
-        throw new AppError("Tài khoản không hợp lệ.", 400);
-      }
-      if (typeof req.body?.is_blocked !== "boolean") {
-        throw new AppError("Trạng thái tài khoản không hợp lệ.", 400);
-      }
-
-      const user = await User.findById(req.params.id);
-      if (!user) throw new AppError("Không tìm thấy tài khoản.", 404);
-      if (user.role === "admin") {
-        throw new AppError("Không thể khóa hoặc mở khóa tài khoản quản trị.", 403);
-      }
-
-      user.is_blocked = req.body.is_blocked;
-      await user.save();
-      res.json({
-        status: "success",
-        data: {
-          _id: user._id,
-          is_blocked: user.is_blocked,
-        },
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  // 1. DASHBOARD & THỐNG KÊ TỔNG QUAN
-  static async getDashboardStats(_req: Request, res: Response, next: NextFunction) {
-    try {
-      const now = new Date();
-      const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-
-      const [
-        totalOrders,
-        pendingOrders,
-        totalProducts,
-        totalCustomers,
-        ordersByStatusAgg,
-        revenueAgg,
-        monthlyRevenueAgg,
-        topProductsAgg,
-        lowStockCount,
-        lowStockVariants,
-        recentOrders,
-      ] = await Promise.all([
-        Order.countDocuments(),
-        Order.countDocuments({ order_status: "pending" }),
-        Product.countDocuments(),
-        User.countDocuments({ role: "customer" }),
-        Order.aggregate([
-          { $group: { _id: "$order_status", count: { $sum: 1 } } },
-        ]),
-        Order.aggregate([
-          {
-            $match: {
-              $or: [
-                { order_status: "completed" },
-                { payment_status: "success" },
-              ],
-            },
-          },
-          { $group: { _id: null, total: { $sum: "$final_amount" } } },
-        ]),
-        Order.aggregate([
-          {
-            $match: {
-              created_at: { $gte: sixMonthsAgo },
-              $or: [
-                { order_status: "completed" },
-                { payment_status: "success" },
-              ],
-            },
-          },
-          {
-            $group: {
-              _id: {
-                year: { $year: "$created_at" },
-                month: { $month: "$created_at" },
-              },
-              revenue: { $sum: "$final_amount" },
-              orders: { $sum: 1 },
-            },
-          },
-          { $sort: { "_id.year": 1, "_id.month": 1 } },
-        ]),
-        OrderDetail.aggregate([
-          {
-            $group: {
-              _id: "$product_name",
-              total_quantity: { $sum: "$quantity" },
-              total_revenue: { $sum: { $multiply: ["$quantity", "$price_at_buy"] } },
-            },
-          },
-          { $sort: { total_quantity: -1 } },
-          { $limit: 5 },
-        ]),
-        ProductVariant.countDocuments({ stock_quantity: { $lte: 10 } }),
-        ProductVariant.find({ stock_quantity: { $lte: 10 } })
-          .populate("product_id", "name slug")
-          .limit(8)
-          .lean(),
-        Order.find()
-          .populate("user_id", "name email phone")
-          .sort({ created_at: -1 })
-          .limit(6)
-          .lean(),
-      ]);
-
-      const statusMap: Record<string, number> = {
-        pending: 0,
-        processing: 0,
-        shipping: 0,
-        completed: 0,
-        cancelled: 0,
-      };
-      for (const item of ordersByStatusAgg) {
-        if (item._id && item._id in statusMap) {
-          statusMap[item._id] = item.count;
-        }
-      }
-
-      // Generate last 6 months list with fallback 0
-      const monthlyData = [];
-      for (let i = 5; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const y = d.getFullYear();
-        const m = d.getMonth() + 1;
-        const key = `T${m}/${y}`;
-        const match = monthlyRevenueAgg.find(
-          (item) => item._id.year === y && item._id.month === m,
-        );
-        monthlyData.push({
-          label: key,
-          revenue: match ? match.revenue : 0,
-          orders: match ? match.orders : 0,
-        });
-      }
-
-      const totalRevenue = revenueAgg[0]?.total ?? 0;
-
-      res.json({
-        status: "success",
-        data: {
-          metrics: {
-            totalRevenue,
-            totalOrders,
-            pendingOrders,
-            totalProducts,
-            totalCustomers,
-            lowStockCount,
-          },
-          ordersByStatus: statusMap,
-          monthlyRevenue: monthlyData,
-          topProducts: topProductsAgg.map((item) => ({
-            name: item._id,
-            quantity: item.total_quantity,
-            revenue: item.total_revenue,
-          })),
-          lowStockAlerts: lowStockVariants.map((item) => ({
-            _id: item._id,
-            sku: item.sku,
-            size: item.size,
-            color: item.color,
-            stock: item.stock_quantity,
-            productName: (item.product_id as unknown as { name?: string })?.name ?? "Sản phẩm",
-          })),
-          recentOrders,
-        },
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
   // 2. QUẢN LÝ TỒN KHO (INVENTORY)
   static async getInventory(req: Request, res: Response, next: NextFunction) {
     try {
-      const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+      const search = literalSearch(req.query.search);
       const lowStockOnly = req.query.low_stock === "true";
-      const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
-      const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit) || 20)));
-      if (!Number.isSafeInteger((page - 1) * limit)) throw new AppError("Trang tồn kho không hợp lệ.", 400);
-
-      const filter: Record<string, unknown> = {};
-      if (lowStockOnly) {
-        filter.stock_quantity = { $lte: 10 };
+      const { page, limit, skip } = readPagination(req.query, 20);
+      const categoryId = req.query.category_id;
+      if (categoryId !== undefined && (typeof categoryId !== "string" || !mongoose.isObjectIdOrHexString(categoryId))) {
+        throw new AppError("Danh mục không hợp lệ.", 400);
       }
+      const categoryProductIds = categoryId === undefined ? undefined
+        : await Product.find({ category_id: categoryId }).distinct("_id");
+      const scoped: Record<string, unknown> = categoryProductIds ? { product_id: { $in: categoryProductIds } } : {};
       if (search) {
-        filter.sku = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+        const match = { $regex: search, $options: "i" };
+        const products = await Product.find({ ...categoryProductIds && { _id: { $in: categoryProductIds } }, name: match }).distinct("_id");
+        scoped.$or = [{ sku: match }, { size: match }, { color: match }, { product_id: { $in: products } }];
       }
-
-      const [variants, total] = await Promise.all([
+      const buckets = {
+        all: {},
+        in_stock: { stock_quantity: { $gt: 10 } },
+        low: { stock_quantity: { $gt: 0, $lte: 10 } },
+        out: { stock_quantity: 0 },
+        quarantine: { quarantine_quantity: { $gt: 0 } },
+      };
+      const bucket = req.query.bucket ?? "all";
+      if (typeof bucket !== "string" || !Object.hasOwn(buckets, bucket)) {
+        throw new AppError("Bộ lọc tồn kho không hợp lệ.", 400);
+      }
+      const selectedBucket = buckets[bucket as keyof typeof buckets];
+      const filter = lowStockOnly ? { $and: [scoped, selectedBucket, { stock_quantity: { $lte: 10 } }] } : { ...scoped, ...selectedBucket };
+      const [variants, total, statusCounts] = await Promise.all([
         ProductVariant.find(filter)
           .populate("product_id", "name slug category_id brand_id status")
-          .sort({ stock_quantity: 1, sku: 1 })
-          .skip((page - 1) * limit)
+          .sort({ stock_quantity: 1, sku: 1, _id: 1 })
+          .skip(skip)
           .limit(limit)
           .lean(),
         ProductVariant.countDocuments(filter),
+        Promise.all(Object.entries(buckets).map(async ([key, criteria]) =>
+          [key, await ProductVariant.countDocuments({ ...scoped, ...criteria })] as const)),
       ]);
 
+      const ids = variants.map((variant) => variant._id);
+      const productIds = variants.flatMap((variant) => variant.product_id ? [variant.product_id._id] : []);
+      const [sales, heldRows, images] = await Promise.all([
+        deliveredSales(new Date(), ids),
+        OrderDetail.aggregate<{ _id: mongoose.Types.ObjectId; amount: number }>([
+          { $match: { product_variant_id: { $in: ids } } },
+          { $lookup: { from: Order.collection.name, localField: "order_id", foreignField: "_id", as: "order" } },
+          { $match: { "order.order_status": { $in: ["pending", "processing"] } } },
+          { $group: { _id: "$product_variant_id", amount: { $sum: "$quantity" } } },
+        ]),
+        ProductImage.find({ product_id: { $in: productIds } }).sort({ is_primary: -1, display_order: 1, _id: 1 }).select("product_id image_url").lean(),
+      ]);
+      const sold = new Map(sales.map((sale) => [String(sale._id.variant), sale.quantity]));
+      const held = new Map(heldRows.map((row) => [String(row._id), row.amount]));
       res.json({
         status: "success",
-        data: variants,
-        pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+        data: variants.map((variant) => ({
+          ...variant,
+          held_quantity: held.get(String(variant._id)) ?? 0,
+          image: images.find((image) => String(image.product_id) === String(variant.product_id?._id))?.image_url,
+          ...stockAdvice(variant.stock_quantity, sold.get(String(variant._id)) ?? 0),
+        })),
+        pagination: { ...paginationMetadata(page, limit, total), statusCounts: Object.fromEntries(statusCounts) },
       });
     } catch (error) {
       next(error);
     }
   }
 
-  static async updateInventoryStock(req: Request, res: Response, next: NextFunction) {
+  static async updateInventoryStock(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const stockQuantity = Number(req.body.stock_quantity);
+      const stockQuantity: unknown = req.body?.stock_quantity;
 
-      if (!mongoose.isValidObjectId(id)) {
+      if (typeof id !== "string" || !mongoose.isValidObjectId(id)) {
         throw new AppError("ID biến thể không hợp lệ.", 400);
       }
-      if (!Number.isSafeInteger(stockQuantity) || stockQuantity < 0) {
+      if (typeof stockQuantity !== "number" || !Number.isSafeInteger(stockQuantity) || stockQuantity < 0) {
         throw new AppError("Số lượng tồn kho phải là số nguyên không âm.", 400);
       }
-
-      const updated = await ProductVariant.findByIdAndUpdate(
-        id,
-        { stock_quantity: stockQuantity },
-        { new: true, runValidators: true },
-      ).populate("product_id", "name");
-
-      if (!updated) {
-        throw new AppError("Không tìm thấy biến thể.", 404);
+      const version: unknown = req.body?.expected_version;
+      if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 0) {
+        throw new AppError("Vui lòng tải lại tồn kho trước khi cập nhật.", 400);
       }
+
+      const note: unknown = req.body?.note;
+      if (note !== undefined && (typeof note !== "string" || !note.trim() || note.trim().length > 1000)) {
+        throw new AppError("Lý do điều chỉnh tồn phải từ 1 đến 1000 ký tự.", 400);
+      }
+
+      const updated = await mongoose.connection.transaction(async (session) => {
+        const previous = await ProductVariant.findOneAndUpdate(
+          { _id: id, ...(version === 0 ? { $or: [{ __v: 0 }, { __v: { $exists: false } }] } : { __v: version }) },
+          { $set: { stock_quantity: stockQuantity }, $inc: { __v: 1 } },
+          { session, returnDocument: "before", runValidators: true },
+        ).populate("product_id", "name").lean();
+        if (!previous) {
+          if (!await ProductVariant.exists({ _id: id }).session(session)) throw new AppError("Không tìm thấy biến thể.", 404);
+          throw new AppError("Tồn kho vừa thay đổi. Vui lòng tải lại trước khi lưu.", 409);
+        }
+        await InventoryMovement.create([{
+          variant_id: previous._id,
+          actor_id: req.user!._id,
+          kind: "adjustment",
+          stock_delta: stockQuantity - previous.stock_quantity,
+          quarantine_delta: 0,
+          note: typeof note === "string" ? `Kiểm kê: ${note.trim()}` : "Điều chỉnh tồn qua API tương thích cũ.",
+        }], { session });
+        return { ...previous, stock_quantity: stockQuantity, __v: version + 1 };
+      });
 
       res.json({
         status: "success",
@@ -334,135 +224,10 @@ export class AdminController {
     }
   }
 
-  // 3. QUẢN LÝ KHÁCH HÀNG & PHÂN QUYỀN
-  static async getCustomers(req: Request, res: Response, next: NextFunction) {
-    try {
-      const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
-      const roleFilter = typeof req.query.role === "string" ? req.query.role.trim() : "";
-
-      const filter: Record<string, unknown> = {};
-      if (roleFilter && ["customer", "staff", "admin"].includes(roleFilter)) {
-        filter.role = roleFilter;
-      }
-      if (search) {
-        filter.$or = [
-          { name: { $regex: search, $options: "i" } },
-          { email: { $regex: search, $options: "i" } },
-          { phone: { $regex: search, $options: "i" } },
-        ];
-      }
-
-      // Security: Strictly exclude password and sensitive tokens
-      const users = await User.find(filter)
-        .select("-password -wishlist -session_version")
-        .sort({ createdAt: -1 })
-        .lean();
-
-      // Aggregate spend and order count for each user
-      const userIds = users.map((u) => u._id);
-      const userOrderStats = await Order.aggregate([
-        { $match: { user_id: { $in: userIds } } },
-        {
-          $group: {
-            _id: "$user_id",
-            orderCount: { $sum: 1 },
-            totalSpent: {
-              $sum: {
-                $cond: [
-                  {
-                    $or: [
-                      { $eq: ["$order_status", "completed"] },
-                      { $eq: ["$payment_status", "success"] },
-                    ],
-                  },
-                  "$final_amount",
-                  0,
-                ],
-              },
-            },
-          },
-        },
-      ]);
-
-      const statsMap = new Map<string, { orderCount: number; totalSpent: number }>();
-      for (const stat of userOrderStats) {
-        statsMap.set(stat._id.toString(), {
-          orderCount: stat.orderCount,
-          totalSpent: stat.totalSpent,
-        });
-      }
-
-      const enrichedUsers = users.map((u) => {
-        const stats = statsMap.get(u._id.toString()) ?? { orderCount: 0, totalSpent: 0 };
-        return {
-          ...u,
-          orderCount: stats.orderCount,
-          totalSpent: stats.totalSpent,
-        };
-      });
-
-      res.json({ status: "success", data: enrichedUsers });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  static async updateCustomerRole(req: AuthRequest, res: Response, next: NextFunction) {
-    try {
-      const { id } = req.params;
-      const { role } = req.body;
-
-      if (!["customer", "staff", "admin"].includes(role)) {
-        throw new AppError("Vai trò không hợp lệ.", 400);
-      }
-      if (req.user?._id?.toString() === id && role !== "admin") {
-        throw new AppError("Bạn không thể tự hạ quyền Admin của chính mình.", 400);
-      }
-
-      const updated = await User.findByIdAndUpdate(
-        id,
-        { role },
-        { new: true, runValidators: true },
-      ).select("-password -wishlist");
-
-      if (!updated) throw new AppError("Không tìm thấy người dùng.", 404);
-
-      res.json({
-        status: "success",
-        message: `Đã cập nhật vai trò thành ${role}.`,
-        data: updated,
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  static async toggleCustomerBlock(req: AuthRequest, res: Response, next: NextFunction) {
-    try {
-      const { id } = req.params;
-      if (req.user?._id?.toString() === id) {
-        throw new AppError("Bạn không thể tự khóa tài khoản của chính mình.", 400);
-      }
-
-      const target = await User.findById(id);
-      if (!target) throw new AppError("Không tìm thấy người dùng.", 404);
-
-      target.is_blocked = !target.is_blocked;
-      await target.save();
-
-      res.json({
-        status: "success",
-        message: target.is_blocked ? "Đã khóa tài khoản." : "Đã kích hoạt lại tài khoản.",
-        data: { _id: target._id, is_blocked: target.is_blocked },
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
   // 4. QUẢN LÝ GIAO DỊCH THANH TOÁN (PAYMENTS)
   static async getPayments(req: Request, res: Response, next: NextFunction) {
     try {
+      const { page, limit, skip } = readPagination(req.query);
       const statusFilter = typeof req.query.status === "string" ? req.query.status.trim() : "";
       const methodFilter = typeof req.query.method === "string" ? req.query.method.trim() : "";
 
@@ -470,41 +235,51 @@ export class AdminController {
       if (statusFilter && ["pending", "success", "failed"].includes(statusFilter)) {
         filter.status = statusFilter;
       }
-      if (methodFilter && ["VNPay", "MoMo", "BankTransfer"].includes(methodFilter)) {
+      if (methodFilter && ["PayOS", "VNPay", "SePay", "MoMo", "BankTransfer"].includes(methodFilter)) {
         filter.payment_method = methodFilter;
       }
 
-      const payments = await Payment.find(filter)
-        .populate("order_id", "receiver_name receiver_phone final_amount order_status payment_method created_at")
-        .sort({ created_at: -1 })
-        .limit(100)
-        .lean();
+      const [payments, total, totals] = await Promise.all([Payment.find(filter)
+        .populate("order_id", "receiver_name receiver_phone final_amount order_status payment_status refund payment_method created_at")
+        .sort({ created_at: -1, _id: -1 })
+        .skip(skip).limit(limit)
+        .lean(), Payment.countDocuments(filter),
+        req.query.summary === "1" ? Payment.aggregate([
+          { $match: filter },
+          { $lookup: { from: Order.collection.name, localField: "order_id", foreignField: "_id", as: "orders" } },
+          { $set: { order: { $first: "$orders" } } },
+          { $group: {
+            _id: null,
+            collected: { $sum: { $cond: [{ $eq: ["$status", "success"] }, "$order.final_amount", 0] } },
+            refunded: { $sum: { $cond: [{ $and: [{ $eq: ["$status", "success"] }, { $eq: ["$order.payment_status", "refunded"] }] }, "$order.refund.amount", 0] } },
+            pending: { $sum: { $cond: [{ $and: [{ $eq: ["$status", "pending"] }, { $eq: ["$order.order_status", "pending"] }] }, 1, 0] } },
+          } },
+          { $project: { _id: 0 } },
+        ]) : [],
+      ]);
 
-      res.json({ status: "success", data: payments });
+      res.json({ status: "success", data: payments, pagination: { ...paginationMetadata(page, limit, total), ...(req.query.summary === "1" ? { paymentTotals: totals[0] ?? { collected: 0, refunded: 0, pending: 0 } } : {}) } });
     } catch (error) {
       next(error);
     }
   }
 
   // 5. QUẢN LÝ ĐÁNH GIÁ SẢN PHẨM (REVIEWS)
-  static async getReviews(_req: Request, res: Response, next: NextFunction) {
+  static async getReviews(req: Request, res: Response, next: NextFunction) {
     try {
-      const comments = await ProductComment.find()
-        .sort({ createdAt: -1 })
-        .limit(100)
-        .lean();
-      res.json({ status: "success", data: comments });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  static async deleteReview(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { id } = req.params;
-      const deleted = await ProductComment.findByIdAndDelete(id);
-      if (!deleted) throw new AppError("Không tìm thấy đánh giá cần xóa.", 404);
-      res.json({ status: "success", message: "Đã xóa đánh giá sản phẩm." });
+      const { page, limit, skip } = readPagination(req.query);
+      const filter: Record<string, unknown> = {};
+      const search = literalSearch(req.query.search);
+      if (search) filter.$or = ["product_key", "user_name", "user_email", "comment"].map((field) => ({ [field]: { $regex: search, $options: "i" } }));
+      if (req.query.rating !== undefined && req.query.rating !== "") {
+        const rating = Number(req.query.rating);
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new AppError("Số sao không hợp lệ.", 400);
+        filter.rating = rating;
+      }
+      const [comments, total] = await Promise.all([ProductComment.find(filter)
+        .sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(), ProductComment.countDocuments(filter)]);
+      const words = await reviewWords();
+      res.json({ status: "success", data: comments.map((review) => ({ ...review, public_comment: moderatedReview(review, words).comment })), pagination: paginationMetadata(page, limit, total) });
     } catch (error) {
       next(error);
     }
@@ -542,6 +317,12 @@ export class AdminController {
       const title = requiredText(req.body.title, "Tên bộ phối");
       const image = requiredText(req.body.image, "Ảnh Lookbook");
       const description = typeof req.body.description === "string" ? req.body.description.trim() : "";
+      const style = typeof req.body.style === "string" ? req.body.style.trim() : undefined;
+      const occasion = typeof req.body.occasion === "string" ? req.body.occasion.trim() : undefined;
+      const gallery: unknown = req.body.gallery;
+      if (gallery !== undefined && (!Array.isArray(gallery) || gallery.length > 6 || !gallery.every(isImageUrl))) {
+        throw new AppError("Thêm tối đa 6 ảnh phụ bằng URL HTTP(S) hoặc đường dẫn tải lên hợp lệ.", 400);
+      }
       const discountType = req.body.discount_type === "fixed" ? "fixed" : "percent";
       const discountValue = Number(req.body.discount_value ?? 10);
       const isActive = req.body.is_active !== false;
@@ -559,40 +340,33 @@ export class AdminController {
       }
 
       const { id } = req.params;
-      let outfit;
-      if (id) {
-        outfit = await Outfit.findByIdAndUpdate(
-          id,
-          { title, image, description, discount_type: discountType, discount_value: discountValue, is_active: isActive },
-          { new: true, runValidators: true },
-        );
-        if (!outfit) throw new AppError("Không tìm thấy Outfit.", 404);
-      } else {
-        outfit = await Outfit.create({
-          title,
-          image,
-          description,
-          discount_type: discountType,
-          discount_value: discountValue,
-          is_active: isActive,
-        });
-      }
+      if (id && !mongoose.isValidObjectId(id)) throw new AppError("ID Outfit không hợp lệ.", 400);
+      const outfit = await mongoose.connection.transaction(async (session) => {
+        let outfit;
+        const values = { title, image, description, style, occasion, ...(gallery === undefined ? {} : { gallery }),
+          discount_type: discountType as "fixed" | "percent", discount_value: discountValue, is_active: isActive };
+        if (id) {
+          outfit = await Outfit.findByIdAndUpdate(id, values, { session, new: true, runValidators: true });
+          if (!outfit) throw new AppError("Không tìm thấy Outfit.", 404);
+        } else {
+          const created = await Outfit.create([values], { session });
+          outfit = created[0];
+          if (!outfit) throw new AppError("Không thể tạo Outfit.", 500);
+        }
 
-      // Update details if provided
-      if (Array.isArray(rawProductIds)) {
-        await OutfitDetail.deleteMany({ outfit_id: outfit._id });
-        if (productIds.length) {
-          const detailDocs = productIds.map((pId, index) => ({
+        if (Array.isArray(rawProductIds)) {
+          await OutfitDetail.deleteMany({ outfit_id: outfit._id }, { session });
+          if (productIds.length) {
+            await OutfitDetail.insertMany(productIds.map((productId, index) => ({
               outfit_id: outfit._id,
-              product_id: new mongoose.Types.ObjectId(pId),
+              product_id: new mongoose.Types.ObjectId(productId),
               display_order: index + 1,
               is_required: true,
-            }));
-          if (detailDocs.length) {
-            await OutfitDetail.insertMany(detailDocs);
+            })), { session });
           }
         }
-      }
+        return outfit;
+      });
 
       res.status(id ? 200 : 201).json({ status: "success", data: outfit });
     } catch (error) {
@@ -603,11 +377,12 @@ export class AdminController {
   static async deleteOutfit(req: Request, res: Response, next: NextFunction) {
     try {
       const id = typeof req.params.id === "string" ? req.params.id : "";
-      const outfit = await Outfit.findByIdAndDelete(id);
-      if (!outfit) throw new AppError("Không tìm thấy Outfit.", 404);
-      if (mongoose.isValidObjectId(id)) {
-        await OutfitDetail.deleteMany({ outfit_id: new mongoose.Types.ObjectId(id) });
-      }
+      if (!mongoose.isValidObjectId(id)) throw new AppError("ID Outfit không hợp lệ.", 400);
+      await mongoose.connection.transaction(async (session) => {
+        const outfit = await Outfit.findByIdAndDelete(id, { session });
+        if (!outfit) throw new AppError("Không tìm thấy Outfit.", 404);
+        await OutfitDetail.deleteMany({ outfit_id: outfit._id }, { session });
+      });
       res.json({ status: "success", message: "Đã xóa bộ phối đồ." });
     } catch (error) {
       next(error);
@@ -617,11 +392,11 @@ export class AdminController {
   // 7. QUẢN LÝ TƯ VẤN SIZE (SIZE RECOMMENDATIONS)
   static async getSizeRecommendations(_req: Request, res: Response, next: NextFunction) {
     try {
-      const recs = await SizeRecommendation.find()
-        .populate("category_id", "name slug")
-        .sort({ size: 1 })
-        .lean();
-      res.json({ status: "success", data: recs });
+      const [categories, products] = await Promise.all([
+        SizeRecommendation.find().populate("category_id", "name slug").sort({ size: 1 }).lean(),
+        ProductSizeChart.find().populate("product_id", "name slug").sort({ size: 1 }).lean(),
+      ]);
+      res.json({ status: "success", data: [...categories, ...products.map((row) => ({ ...row, scope: "product" }))] });
     } catch (error) {
       next(error);
     }
@@ -629,41 +404,25 @@ export class AdminController {
 
   static async saveSizeRecommendation(req: Request, res: Response, next: NextFunction) {
     try {
-      const categoryId = requiredText(req.body.category_id, "Danh mục");
-      const size = requiredText(req.body.size, "Kích cỡ").toUpperCase();
-      const minHeight = Number(req.body.min_height);
-      const maxHeight = Number(req.body.max_height);
-      const minWeight = Number(req.body.min_weight);
-      const maxWeight = Number(req.body.max_weight);
-      const fitType = req.body.fit_type ?? "Regular";
-
-      if (!mongoose.isValidObjectId(categoryId)) {
-        throw new AppError("ID danh mục không hợp lệ.", 400);
-      }
-      if (!await Category.exists({ _id: categoryId })) {
-        throw new AppError("Danh mục không tồn tại.", 404);
-      }
-      if ([minHeight, maxHeight, minWeight, maxWeight].some((value) => !Number.isFinite(value) || value <= 0)) {
-        throw new AppError("Chiều cao và cân nặng phải là số dương.", 400);
-      }
-      if (minHeight >= maxHeight || minWeight >= maxWeight) {
-        throw new AppError("Khoảng chiều cao hoặc cân nặng tối thiểu phải nhỏ hơn tối đa.", 400);
-      }
-
       const { id } = req.params;
-      const payload = {
-        category_id: categoryId,
-        size,
-        min_height: minHeight,
-        max_height: maxHeight,
-        min_weight: minWeight,
-        max_weight: maxWeight,
-        fit_type: fitType,
-      };
-
-      const record = id
-        ? await SizeRecommendation.findByIdAndUpdate(id, payload, { new: true, runValidators: true })
-        : await SizeRecommendation.create(payload);
+      if (id && (typeof id !== "string" || !mongoose.isObjectIdOrHexString(id))) throw new AppError("ID quy tắc không hợp lệ.", 400);
+      const isProduct = req.body.product_id != null && req.body.product_id !== "";
+      const label = isProduct ? "Sản phẩm" : "Danh mục";
+      const targetId = requiredText(isProduct ? req.body.product_id : req.body.category_id, label);
+      if (!mongoose.isObjectIdOrHexString(targetId)) throw new AppError(`ID ${label.toLowerCase()} không hợp lệ.`, 400);
+      if (!(isProduct ? await Product.exists({ _id: targetId }) : await Category.exists({ _id: targetId }))) {
+        throw new AppError(`${label} không tồn tại.`, 404);
+      }
+      const row = readChartRow(req.body);
+      const optional = [...bodyFields.flatMap((field) => [`min_${field}`, `max_${field}`] as const), "garment"] as const;
+      const unset = Object.fromEntries(optional.filter((key) => row[key] === undefined).map((key) => [key, 1]));
+      const record = isProduct
+        ? id
+          ? await ProductSizeChart.findByIdAndUpdate(id, { $set: { ...row, product_id: targetId }, $unset: unset }, { new: true, runValidators: true })
+          : await ProductSizeChart.create({ ...row, product_id: targetId })
+        : id
+          ? await SizeRecommendation.findByIdAndUpdate(id, { $set: { ...row, category_id: targetId }, $unset: unset }, { new: true, runValidators: true })
+          : await SizeRecommendation.create({ ...row, category_id: targetId });
 
       if (!record) throw new AppError("Không tìm thấy cấu hình size.", 404);
 
@@ -676,7 +435,8 @@ export class AdminController {
   static async deleteSizeRecommendation(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const deleted = await SizeRecommendation.findByIdAndDelete(id);
+      if (typeof id !== "string" || !mongoose.isObjectIdOrHexString(id)) throw new AppError("ID quy tắc không hợp lệ.", 400);
+      const deleted = await SizeRecommendation.findByIdAndDelete(id) ?? await ProductSizeChart.findByIdAndDelete(id);
       if (!deleted) throw new AppError("Không tìm thấy cấu hình size.", 404);
       res.json({ status: "success", message: "Đã xóa quy tắc gợi ý size." });
     } catch (error) {
@@ -701,21 +461,25 @@ export class AdminController {
           throw new AppError(`Không thể hủy đơn hàng đang ở trạng thái ${order.order_status}.`, 409);
         }
         if (order.payment_status === "success") {
-          throw new AppError("Cần xử lý hoàn tiền trước khi hủy đơn đã thanh toán.", 409);
+          if (req.body.acknowledge_refund !== true) throw new AppError("Đơn đã thu tiền. Cần xác nhận đưa đơn vào danh sách chờ hoàn tiền.", 409);
+          if (req.user?.role !== "admin") throw new AppError("Chỉ quản trị viên được hủy đơn đã thu tiền.", 403);
+          if (typeof req.body.note !== "string" || !note || note.length > 1000) throw new AppError("Vui lòng ghi lý do hủy đơn, tối đa 1000 ký tự.", 400);
         }
 
+        if (order.payment_method === "PayOS" && order.payment_status === "pending") {
+          if (req.user?.role !== "admin") throw new AppError("Cần quản trị viên đối soát đơn từ cổng cũ.", 403);
+          if (req.body.legacy_link_closed !== true || typeof req.body.note !== "string" || !note || note.length > 1000) throw new AppError("Cần xác nhận đã đối soát, đóng liên kết cũ và ghi lý do trước khi hủy.", 409);
+          await Payment.updateOne({ order_id: order._id, payment_method: order.payment_method, status: "pending" }, { $set: { status: "failed" } }, { session });
+          order.payment_status = "failed";
+        }
+
+        if (order.payment_method === "SePay" && order.payment_status === "pending") {
+          await Payment.updateOne({ order_id: order._id, payment_method: "SePay", status: "pending" }, { $set: { status: "failed" } }, { session });
+          order.payment_status = "failed";
+        }
         const items = await OrderDetail.find({ order_id: order._id }).session(session);
 
-        // Hoàn lại kho cho từng biến thể
-        for (const item of items) {
-          if (item.product_variant_id) {
-            await ProductVariant.updateOne(
-              { _id: item.product_variant_id },
-              { $inc: { stock_quantity: item.quantity } },
-              { session },
-            );
-          }
-        }
+        await restoreOrderStock(items, session);
 
         order.order_status = "cancelled";
         await order.save({ session });
@@ -724,7 +488,7 @@ export class AdminController {
         const historyRecord = new OrderStatusHistory({
           order_id: order._id,
           status: "cancelled",
-          note,
+          note: order.payment_status === "success" ? note + " · Chờ hoàn tiền cho khách." : order.payment_method === "PayOS" && req.body.legacy_link_closed === true ? note + " · Quản trị viên đã kiểm tra liên kết cũ và xác nhận chưa thu tiền." : note,
           changed_by: req.user?._id,
         });
         await historyRecord.save({ session });
@@ -770,9 +534,24 @@ export class AdminController {
           throw new AppError("Phí và ngưỡng miễn phí vận chuyển phải là số nguyên không âm.", 400);
         }
       }
+      const expressProvince = values?.express_shipping_province_code;
+      const expressWards = values?.express_shipping_ward_codes;
+      if (expressWards !== undefined && (!Array.isArray(expressWards) || expressProvince === undefined)) {
+        throw new AppError("Cần gửi tỉnh/thành cùng danh sách phường, xã giao hỏa tốc.", 400);
+      }
+      if (expressProvince !== undefined && expressProvince !== null) {
+        if (typeof expressProvince !== "number") throw new AppError("Mã tỉnh/thành giao hỏa tốc không hợp lệ.", 400);
+        const wards = new Set(getProvince(expressProvince).wards.map(({ code }) => code));
+        if (Array.isArray(expressWards) && expressWards.some((code) => !wards.has(code))) {
+          throw new AppError("Phường, xã giao hỏa tốc phải thuộc tỉnh/thành đã chọn.", 400);
+        }
+      } else if (Array.isArray(expressWards) && expressWards.length) {
+        throw new AppError("Cần chọn tỉnh/thành khi cấu hình phường, xã giao hỏa tốc.", 400);
+      }
       const updates = Object.fromEntries(Object.keys(DEFAULT_STORE_SETTINGS)
         .filter((key) => values?.[key] !== undefined)
         .map((key) => [`value.${key}`, values?.[key]]));
+      if (expressProvince !== undefined) updates["value.express_shipping_ward_codes"] = Array.isArray(expressWards) ? [...new Set(expressWards)] : [];
       if (!Object.keys(updates).length) throw new AppError("Vui lòng nhập giá trị cấu hình.", 400);
       const updated = await Setting.findOneAndUpdate(
         { key: "store_config" },
@@ -786,16 +565,63 @@ export class AdminController {
   }
 
   // 10. ĐƠN HÀNG (ORDERS)
-  static async getOrders(_req: Request, res: Response, next: NextFunction) {
+  static async getOrders(req: Request, res: Response, next: NextFunction) {
     try {
-      const orders = await Order.find()
+      const { page, limit, skip } = readPagination(req.query);
+      const search = literalSearch(req.query.search);
+      const baseFilter: Record<string, unknown> = {};
+      if (req.query.method !== undefined && req.query.method !== "") {
+        if (!isStoredPaymentMethod(req.query.method)) throw new AppError("Phương thức thanh toán không hợp lệ.", 400);
+        baseFilter.payment_method = req.query.method;
+      }
+      if (req.query.payment_status !== undefined) {
+        const status = req.query.payment_status;
+        if (status !== "pending" && status !== "success" && status !== "failed" && status !== "refunded") throw new AppError("Trạng thái thanh toán không hợp lệ.", 400);
+        baseFilter.payment_status = status;
+      }
+      if (req.query.shipping !== undefined) {
+        if (req.query.shipping !== "Standard" && req.query.shipping !== "Express") throw new AppError("Phương thức giao hàng không hợp lệ.", 400);
+        baseFilter.shipping_method = req.query.shipping;
+      }
+      if (req.query.period !== undefined) {
+        if (req.query.period !== "1" && req.query.period !== "7" && req.query.period !== "30") throw new AppError("Khoảng thời gian không hợp lệ.", 400);
+        const now = new Date();
+        const offset = 7 * 3600_000;
+        const local = new Date(now.getTime() + offset);
+        const start = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() - Number(req.query.period) + 1) - offset;
+        baseFilter.created_at = { $gte: new Date(start), $lte: now };
+      }
+      if (search) {
+        const users = await User.find({ email: { $regex: search, $options: "i" } }).select("_id").lean();
+        baseFilter.$or = [
+          { receiver_name: { $regex: search, $options: "i" } },
+          { receiver_phone: { $regex: search, $options: "i" } },
+          { user_id: { $in: users.map((user) => user._id) } },
+          { $expr: { $regexMatch: { input: { $toString: "$_id" }, regex: search, options: "i" } } },
+        ];
+      }
+      const queue = orderQueueFilter(req.query.queue);
+      if (Object.keys(queue).length) baseFilter.$and = [queue];
+      const filter = { ...baseFilter };
+      if (req.query.status !== undefined && req.query.status !== "") {
+        if (typeof req.query.status !== "string" || !["pending", "processing", "shipping", "delivery_failed", "returning", "returned", "completed", "cancelled"].includes(req.query.status)) {
+          throw new AppError("Trạng thái đơn hàng không hợp lệ.", 400);
+        }
+        filter.order_status = req.query.status;
+      }
+      const [orders, total, grouped] = await Promise.all([Order.find(filter)
         .populate("user_id", "name email phone")
-        .sort({ created_at: -1 })
-        .limit(200)
-        .lean();
+        .sort(Object.keys(queue).length ? { created_at: 1, _id: 1 } : { created_at: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+        Order.countDocuments(filter),
+        Order.aggregate<{ _id: string; count: number }>([
+          { $match: baseFilter }, { $group: { _id: "$order_status", count: { $sum: 1 } } },
+        ]),
+      ]);
+      const statusCounts: Record<string, number> = { all: grouped.reduce((sum, group) => sum + group.count, 0) };
+      for (const group of grouped) statusCounts[group._id] = group.count;
       const orderIds = orders.map((order) => order._id);
       const details = await OrderDetail.find({ order_id: { $in: orderIds } })
-        .select("order_id product_name sku size color quantity price_at_buy")
+        .select("order_id product_id product_variant_id product_name sku size color quantity price_at_buy")
         .lean();
       const detailsByOrder = new Map<string, typeof details>();
       for (const detail of details) {
@@ -804,6 +630,7 @@ export class AdminController {
       }
       res.json({
         status: "success",
+        pagination: { ...paginationMetadata(page, limit, total), statusCounts },
         data: orders.map((order) => ({
           ...order,
           items: detailsByOrder.get(order._id.toString()) ?? [],
@@ -868,8 +695,9 @@ export class AdminController {
       };
       const couponId = req.params.id;
       const coupon = couponId
-        ? await Coupon.findByIdAndUpdate(couponId, values, { new: true, runValidators: true })
+        ? await Coupon.findOneAndUpdate({ _id: couponId, used_count: { $not: { $gt: usageLimit } } }, values, { returnDocument: "after", runValidators: true })
         : await Coupon.create(values);
+      if (!coupon && couponId && await Coupon.exists({ _id: couponId })) throw new AppError("Giới hạn sử dụng không được thấp hơn số lượt đã dùng.", 409);
       if (!coupon) throw new AppError("Không tìm thấy mã giảm giá.", 404);
       res.status(couponId ? 200 : 201).json({ status: "success", data: coupon });
     } catch (error) {
@@ -879,7 +707,11 @@ export class AdminController {
 
   static async deleteCoupon(req: Request, res: Response, next: NextFunction) {
     try {
-      const coupon = await Coupon.findByIdAndDelete(req.params.id);
+      const id = req.params.id;
+      if (typeof id !== "string" || !mongoose.isObjectIdOrHexString(id)) throw new AppError("ID mã giảm giá không hợp lệ.", 400);
+      if (await Order.exists({ coupon_id: id })) throw new AppError("Mã đã gắn với đơn hàng. Hãy tắt mã để giữ lịch sử sử dụng.", 409);
+      const coupon = await Coupon.findOneAndDelete({ _id: id, used_count: { $not: { $gt: 0 } } });
+      if (!coupon && await Coupon.exists({ _id: id })) throw new AppError("Mã đã có lượt sử dụng. Hãy tắt mã để giữ lịch sử.", 409);
       if (!coupon) throw new AppError("Không tìm thấy mã giảm giá.", 404);
       res.json({ status: "success", message: "Đã xóa mã giảm giá." });
     } catch (error) {
@@ -943,7 +775,10 @@ export class AdminController {
 
   static async createProduct(req: Request, res: Response, next: NextFunction) {
     try {
-      const product = await StorefrontProduct.create(await productInput(req.body));
+      const product = await mongoose.connection.transaction(async session=>{
+        await lockCategoryTree(session);
+        const rows=await StorefrontProduct.create([await productInput(req.body,session)],{session});return rows[0]!;
+      });
       await product.populate("category_id", "name slug");
       res.status(201).json({ status: "success", data: product });
     } catch (error) {
@@ -953,11 +788,11 @@ export class AdminController {
 
   static async updateProduct(req: Request, res: Response, next: NextFunction) {
     try {
-      const product = await StorefrontProduct.findByIdAndUpdate(
-        req.params.id,
-        await productInput(req.body),
-        { new: true, runValidators: true },
-      ).populate("category_id", "name slug");
+      const product = await mongoose.connection.transaction(async session=>{
+        await lockCategoryTree(session);
+        return StorefrontProduct.findByIdAndUpdate(req.params.id,await productInput(req.body,session),{session,new:true,runValidators:true});
+      });
+      if(product)await product.populate("category_id","name slug");
       if (!product) throw new AppError("Không tìm thấy sản phẩm.", 404);
       res.json({ status: "success", data: product });
     } catch (error) {

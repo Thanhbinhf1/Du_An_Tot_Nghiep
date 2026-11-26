@@ -3,12 +3,13 @@ import mongoose, { Types } from "mongoose";
 import Order from "../models/orderModel.js";
 import OrderDetail from "../models/orderDetailModel.js";
 import Payment from "../models/paymentModel.js";
-import ProductVariant from "../models/productVariantModel.js";
 import OrderStatusHistory from "../models/orderStatusHistoryModel.js";
 import { restoreCouponUse } from "./checkoutPricing.js";
+import { restoreOrderStock } from "./orderStock.js";
 
 type FailureResult =
   | "cancelled_and_restored"
+  | "failed_after_cancellation"
   | "already_processed"
   | "conflict";
 
@@ -54,45 +55,19 @@ export async function applyVerifiedPaymentFailure(input: {
       return "already_processed";
     }
 
-    // Không xử lý đơn đã thanh toán hoặc đổi trạng thái
+    const previouslyCancelled = order.order_status === "cancelled";
     if (
       payment.status !== "pending" ||
       order.payment_status !== "pending" ||
-      order.order_status !== "pending"
+      (order.order_status !== "pending" && !previouslyCancelled)
     ) {
       return "conflict";
     }
 
-    // 3. Lấy chi tiết đơn hàng
-    const details = await OrderDetail.find({
-      order_id: order._id,
-    }).session(session);
-
-    if (details.length === 0) {
-      throw new Error("Không có chi tiết đơn hàng để hoàn tồn kho");
-    }
-
-    // 4. Gộp số lượng các dòng cùng một biến thể
-    const stockToRestore = new Map<string, number>();
-
-    for (const item of details) {
-      if (
-        !item.product_variant_id ||
-        !Number.isSafeInteger(item.quantity) ||
-        item.quantity <= 0
-      ) {
-        throw new Error("Chi tiết đơn hàng không hợp lệ");
-      }
-
-      const variantId = String(item.product_variant_id);
-
-      const quantity = (stockToRestore.get(variantId) ?? 0) + item.quantity;
-
-      if (!Number.isSafeInteger(quantity)) {
-        throw new Error("Số lượng hoàn kho không hợp lệ");
-      }
-
-      stockToRestore.set(variantId, quantity);
+    if (!previouslyCancelled) {
+      const details = await OrderDetail.find({ order_id: order._id }).session(session);
+      if (!details.length) throw new Error("Không có chi tiết đơn hàng để hoàn tồn kho");
+      await restoreOrderStock(details, session, false);
     }
 
     // 5. Chuyển đơn sang cancelled có điều kiện
@@ -101,7 +76,7 @@ export async function applyVerifiedPaymentFailure(input: {
         _id: order._id,
         payment_method: input.method,
         payment_status: "pending",
-        order_status: "pending",
+        order_status: order.order_status,
       },
       {
         $set: {
@@ -143,24 +118,7 @@ export async function applyVerifiedPaymentFailure(input: {
       throw new Error("Payment state conflict");
     }
 
-    // 7. Hoàn tồn kho
-    for (const [variantId, quantity] of stockToRestore) {
-      const result = await ProductVariant.updateOne(
-        { _id: variantId },
-        {
-          $inc: {
-            stock_quantity: quantity,
-          },
-        },
-        { session },
-      );
-
-      if (result.matchedCount !== 1) {
-        throw new Error("Không tìm thấy biến thể để hoàn tồn kho");
-      }
-    }
-
-    await restoreCouponUse(order.coupon_id, session);
+    if (!previouslyCancelled) await restoreCouponUse(order.coupon_id, session);
 
     // 8. Ghi lịch sử hủy đơn
     await OrderStatusHistory.create(
@@ -175,6 +133,6 @@ export async function applyVerifiedPaymentFailure(input: {
       { session },
     );
 
-    return "cancelled_and_restored";
+    return previouslyCancelled ? "failed_after_cancellation" : "cancelled_and_restored";
   });
 }

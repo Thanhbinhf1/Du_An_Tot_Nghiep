@@ -20,7 +20,7 @@ const storefrontProductSchema = new Schema<IStorefrontProduct>(
     code: { type: String, required: true, trim: true, unique: true },
     color: { type: String, required: true, trim: true },
     sizes: { type: [String], required: true, default: [] },
-    price: { type: Number, required: true, min: 0 },
+    price: { type: Number, required: true, min: 0, validate: { validator: Number.isSafeInteger, message: "Giá phải là số nguyên VNĐ an toàn" } },
     image: { type: String, required: true, trim: true },
     rating: { type: Number, default: 5, min: 0, max: 5 },
   },

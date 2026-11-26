@@ -1,7 +1,7 @@
 import Setting from "../models/settingModel.js";
 
 export const STORE_INFO_DEFAULTS = {
-  store_name: "F.Style Store",
+  store_name: "VSC_BAPD",
   tagline: "Thời trang hiện đại & Đẳng cấp tối giản",
   hotline: "1900 6868",
   email: "support@fstyle.vn",

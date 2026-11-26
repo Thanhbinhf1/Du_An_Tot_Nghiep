@@ -1,17 +1,23 @@
 import type { ProductVariant } from "./cart-api";
 import type { Product } from "@/types/product";
+import { STORE_NAME } from "./store-brand";
 
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api").replace(/\/+$/, "");
+export type ApiPagination = { totalPages: number; total?: number; page?: number; limit?: number; paymentTotals?: { collected: number; refunded: number; pending: number }; statusCounts?: Record<string, number> };
+export class ApiError extends Error {
+  constructor(message: string, public status: number, public issues: { path: string; message: string }[] = []) { super(message); }
+}
 
 export async function readApiEnvelope<T>(response: Response, allowMissingData = false) {
   const result = (await response.json().catch(() => ({}))) as {
     status?: string;
     message?: string;
     data?: T;
-    pagination?: { totalPages: number; total?: number };
+    pagination?: ApiPagination;
+    issues?: { path: string; message: string }[];
   };
   if (!response.ok || result.status === "error" || (!allowMissingData && result.data === undefined)) {
-    throw new Error(result.message ?? "Không thể hoàn tất yêu cầu đến máy chủ.");
+    throw new ApiError(result.message ?? "Không thể hoàn tất yêu cầu đến máy chủ.", response.status, result.issues);
   }
   return { data: result.data as T, pagination: result.pagination };
 }
@@ -47,6 +53,9 @@ export type ApiProduct = {
   name: string;
   slug: string;
   description?: string;
+  product_code?: string;
+  material?: string;
+  care_instructions?: string;
   is_featured?: boolean;
   audiences?: string[];
   image?: string;
@@ -99,7 +108,7 @@ export function mapApiProduct(product: ApiProduct): Product & { variants: Produc
   return {
     id: product._id,
     name: product.name,
-    code: product.slug,
+    code: product.product_code || product.slug,
     color: [...new Set(variants.map((variant) => variant.color).filter(Boolean))].join(", "),
     sizes: [...new Set(variants.map((variant) => variant.size).filter(Boolean))],
     price: effectivePrice,
@@ -111,7 +120,7 @@ export function mapApiProduct(product: ApiProduct): Product & { variants: Produc
     categoryId: typeof product.category_id === "string" ? product.category_id : product.category_id?._id,
     categorySlug: typeof product.category_id === "object" ? product.category_id?.slug : undefined,
     audiences: product.audiences,
-    brand: typeof product.brand_id === "object" ? product.brand_id?.name ?? "F.Style" : "F.Style",
+    brand: typeof product.brand_id === "object" ? product.brand_id?.name ?? STORE_NAME : STORE_NAME,
     brandId: typeof product.brand_id === "string" ? product.brand_id : product.brand_id?._id,
     rating: product.average_rating ?? 0,
     reviewCount: product.review_count,
@@ -120,6 +129,8 @@ export function mapApiProduct(product: ApiProduct): Product & { variants: Produc
     totalStock,
     createdAt: product.created_at ?? product.createdAt,
     description: product.description,
+    material: product.material,
+    careInstructions: product.care_instructions,
     variants,
   };
 }

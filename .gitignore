@@ -5,6 +5,12 @@ frontend/out/
 backend/dist/
 backend/build/
 
+# TypeScript source must not be shadowed by generated JavaScript/declarations.
+backend/src/**/*.js
+backend/src/**/*.js.map
+backend/src/**/*.d.ts
+backend/src/**/*.d.ts.map
+
 # Secret & Environment
 **/.env
 **/.env.*
@@ -14,3 +20,8 @@ backend/build/
 .DS_Store
 *.log
 .vscode/
+frontend/.next-e2e/
+frontend/e2e/.runtime/
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e-results.json

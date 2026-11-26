@@ -1,8 +1,10 @@
 import { Router } from "express";
+import { normalizeRequestBody } from "../middlewares/requestBodyMiddleware.js";
 import { protect } from "../middlewares/authMiddleware.js";
 import { CartController } from "../controllers/cartController.js";
 
 const router = Router();
+router.use(normalizeRequestBody);
 
 router.use(protect);
 

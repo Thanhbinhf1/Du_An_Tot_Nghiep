@@ -34,6 +34,7 @@ const cartDetailSchema = new Schema<ICartDetail>(
       type: Number,
       required: true,
       min: [1, "Số lượng mua ít nhất phải là 1"],
+      validate: { validator: Number.isSafeInteger, message: "Số lượng phải là số nguyên an toàn" },
     },
   },
   {

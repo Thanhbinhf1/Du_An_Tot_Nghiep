@@ -4,13 +4,16 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "check:source": "node scripts/check-source-artifacts.mjs",
+    "dev": "npm run check:source && tsx watch src/server.ts",
+    "build": "npm run check:source && tsc",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "test": "npm run check:source && tsx --test tests/*.test.ts",
+    "test:mongodb": "tsx --test tests/mongodbTransaction.integration.ts",
     "test:integration": "tsx --test tests/productVariants.integration.ts",
     "start": "node dist/server.js",
-    "create-admin": "tsx src/scripts/createAdmin.ts"
+    "create-admin": "npm run check:source && tsx src/scripts/createAdmin.ts"
   },
   "keywords": [],
   "author": "",
@@ -26,7 +29,8 @@
     "google-auth-library": "^11.3.4",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.9.4",
-    "multer": "^2.4.0"
+    "multer": "^2.4.0",
+    "nodemailer": "^10.6.1"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
@@ -36,6 +40,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.2.0",
     "@types/node": "^26.3.0",
+    "@types/nodemailer": "^8.0.2",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"
   }

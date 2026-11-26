@@ -7,6 +7,7 @@ export interface ICategory extends Document {
   parent_id: Types.ObjectId | null;
   name: string;
   slug: string;
+  previous_slugs?: string[];
   image?: string;
   description: string;
   status: boolean;
@@ -40,6 +41,7 @@ const categorySchema = new Schema<ICategory>(
       type: String,
       default: "", // Không bắt buộc có ảnh
     },
+    previous_slugs: { type: [String], default: undefined },
     description: { type: String, default: "", trim: true },
     status: {
       type: Boolean,
@@ -51,6 +53,7 @@ const categorySchema = new Schema<ICategory>(
       createdAt: "created_at",
       updatedAt: "updated_at",
     },
+    optimisticConcurrency: true,
   },
 );
 

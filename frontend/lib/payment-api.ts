@@ -1,4 +1,4 @@
-import { API_BASE_URL, authenticatedHeaders, readApiResponse } from "./api";
+import { API_BASE_URL, authenticatedHeaders, readApiEnvelope, readApiResponse } from "./api";
 import type { PaymentMethod } from "./order-api";
 
 export async function getPaymentMethods(token: string) {
@@ -14,7 +14,7 @@ export type PaymentStatus = "pending" | "success" | "failed" | "refunded";
 export interface PaymentRecord {
   _id: string;
   order_id: string;
-  payment_method: "VNPay" | "MoMo" | "BankTransfer";
+  payment_method: Exclude<PaymentMethod, "COD">;
   status: "pending" | "success" | "failed";
   paid_at?: string | null;
 }
@@ -48,10 +48,11 @@ export interface CreateOnlinePaymentResponse {
   reused?: boolean;
 }
 
-export async function createMoMoCheckout(
+async function createGatewayCheckout<T>(
+  gateway: "momo" | "sepay",
   orderId: string,
   token: string,
-): Promise<CreateOnlinePaymentResponse> {
+): Promise<T> {
   if (!token) {
     throw new Error("Vui lòng đăng nhập để thanh toán.");
   }
@@ -60,7 +61,7 @@ export async function createMoMoCheckout(
     throw new Error("Mã đơn hàng không hợp lệ.");
   }
 
-  const response = await fetch(`${API_BASE_URL}/payments/momo/create`, {
+  const response = await fetch(`${API_BASE_URL}/payments/${gateway}/create`, {
     method: "POST",
     headers: {
       ...authenticatedHeaders(token),
@@ -71,41 +72,37 @@ export async function createMoMoCheckout(
     }),
   });
 
-  return readApiResponse<CreateOnlinePaymentResponse>(response);
+  return readApiResponse<T>(response);
 }
 
-export interface CreateVNPayResponse {
+export function createMoMoCheckout(orderId: string, token: string) {
+  return createGatewayCheckout<CreateOnlinePaymentResponse>("momo", orderId, token);
+}
+
+export interface SePayPaymentResponse {
   payment_id: string;
   order_id: string;
-  payment_url: string;
-  expires_at: string;
-  reused: boolean;
+  amount: number;
+  payment_method: "SePay";
+  qr_url: string;
+  transfer_content: string;
+  bank: {
+    bank_name: string;
+    account_number: string;
+    account_name: string;
+  };
 }
 
-export async function createVNPayCheckout(
-  orderId: string,
-  token: string,
-): Promise<CreateVNPayResponse> {
-  if (!token) {
-    throw new Error("Vui lòng đăng nhập để thanh toán.");
-  }
+export function createSePayCheckout(orderId: string, token: string) {
+  return createGatewayCheckout<SePayPaymentResponse>("sepay", orderId, token);
+}
 
-  if (!/^[a-fA-F0-9]{24}$/.test(orderId)) {
-    throw new Error("Mã đơn hàng không hợp lệ.");
-  }
-
-  const response = await fetch(`${API_BASE_URL}/payments/vnpay/create`, {
+export async function reconcileSePayOrder(orderId: string, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/payments/sepay/orders/${encodeURIComponent(orderId)}/reconcile`, {
     method: "POST",
-    headers: {
-      ...authenticatedHeaders(token),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      order_id: orderId,
-    }),
+    headers: authenticatedHeaders(token),
   });
-
-  return readApiResponse<CreateVNPayResponse>(response);
+  await readApiEnvelope(response, true);
 }
 
 export interface BankTransferPaymentResponse {

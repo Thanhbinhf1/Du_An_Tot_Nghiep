@@ -198,6 +198,6 @@ test("VNPay báo lỗi nếu không thể hoàn tồn kho", async (t) => {
 
   await assert.rejects(
     applyVerifiedVNPayFailure(input),
-    /Không tìm thấy biến thể để hoàn tồn kho/,
+    { statusCode: 409 },
   );
 });

@@ -27,7 +27,8 @@ export class AuthService {
       throw new AppError("Google chưa xác minh địa chỉ email này.", 401);
     }
 
-    const email = profile.email.toLowerCase();
+    const email = profile.email.trim().toLowerCase();
+    const authoritativeEmail = email.endsWith("@gmail.com") || (typeof profile.hd === "string" && profile.hd.length > 0);
     let user;
     try {
       user = await User.findOneAndUpdate({ google_sub: profile.sub }, {
@@ -41,9 +42,21 @@ export class AuthService {
     } catch (error) {
       if (!(typeof error === "object" && error !== null && "code" in error && error.code === 11000)) throw error;
       user = await User.findOne({ google_sub: profile.sub });
+      if (!user && authoritativeEmail) {
+        // Google quản lý email Gmail/Workspace này, nên có thể khôi phục liên kết
+        // trên tài khoản cùng email mà không tạo một tài khoản mua sắm mới.
+        user = await User.findOneAndUpdate({
+          email,
+          is_blocked: { $ne: true },
+          google_sub: { $in: [null, "", profile.sub] },
+        }, { $set: { google_sub: profile.sub } }, {
+          returnDocument: "after",
+          runValidators: true,
+        });
+      }
       if (!user) throw new AppError("Email đã được dùng. Vui lòng đăng nhập theo phương thức đã đăng ký.", 409);
     }
-    if (!user || user.is_blocked || user.auth_provider !== "google") {
+    if (!user || user.is_blocked) {
       throw new AppError("Tài khoản không thể đăng nhập. Vui lòng liên hệ hỗ trợ.", 403);
     }
     return { email: user.email, role: user.role, token: this.generateToken(String(user._id), user.role, user.session_version) };
@@ -56,7 +69,7 @@ export class AuthService {
     return jwt.sign({ id: userId, role, sessionVersion }, secret, { expiresIn: "7d" });
   }
 
-  private static validateNewPassword(password: unknown): asserts password is string {
+  static validateNewPassword(password: unknown): asserts password is string {
     if (typeof password !== "string" || password.length < 8 || Buffer.byteLength(password, "utf8") > 72) {
       throw new AppError("Mật khẩu phải có ít nhất 8 ký tự và tối đa 72 byte UTF-8.", 400);
     }

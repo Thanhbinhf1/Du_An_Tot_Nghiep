@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signOutDemo, useDemoAuth } from "@/lib/demo-auth";
-import { AccountSidebar } from "@/components/account/ProfileSettings";
+import AccountLayout from "@/components/account/AccountLayout";
+import styles from "@/components/account/account.module.css";
 import { getAccountProfile, type AccountProfile } from "@/lib/account-api";
 import { formatShippingAddress, getShippingAddresses } from "@/lib/address-api";
 
@@ -14,11 +15,10 @@ export default function ProfilePage() {
   if (!isHydrated) return <p role="status">Đang kiểm tra đăng nhập...</p>;
   if (!token) {
     return (
-      <section className="profile-page profile-logged-out">
-        <h1>Đăng nhập để xem hồ sơ</h1>
-        <p>Tài khoản của bạn chưa đăng nhập trên thiết bị này.</p>
-        <Link className="profile-login-link" href="/dang-nhap">Đăng nhập</Link>
-      </section>
+      <AccountLayout active="overview" title="Hồ sơ cá nhân">
+        <p>Đăng nhập để xem thông tin liên hệ và địa chỉ giao hàng của bạn.</p>
+        <Link className={styles.primary} href="/dang-nhap">Đăng nhập</Link>
+      </AccountLayout>
     );
   }
   return <ProfileContent key={token} token={token} />;
@@ -51,29 +51,39 @@ function ProfileContent({ token }: { token: string }) {
   }
 
   return (
-    <div className="container account-page-layout">
-      <AccountSidebar active="overview" />
-      <section className="account-page-content">
-        <div className="profile-heading">
-          <div><span className="profile-eyebrow">TÀI KHOẢN CỦA BẠN</span><h1>Hồ sơ cá nhân</h1><p>Quản lý thông tin tài khoản và trải nghiệm mua sắm.</p></div>
-          <button className="profile-logout" type="button" onClick={handleLogout}>Đăng xuất</button>
+    <AccountLayout active="overview" title="Hồ sơ cá nhân" description="Quản lý thông tin liên hệ, địa chỉ và đơn hàng của bạn."
+      action={<button className={styles.secondary} type="button" onClick={handleLogout}>Đăng xuất</button>}>
+      {error && <p className={styles.message} role="alert">{error}</p>}
+      {!profile && !error && <p className={styles.panel} role="status">Đang tải hồ sơ…</p>}
+      {profile && (
+        <div className={styles.overview}>
+          <section className={styles.panel}>
+            <div className={styles.panelHeader}>
+              <h2>Thông tin tài khoản</h2>
+              <Link className={styles.jumpLink} href="/profile/edit">Chỉnh sửa</Link>
+            </div>
+            <div className={styles.identity}>
+              <span className={styles.avatar} aria-hidden="true">{(profile.name || profile.email).charAt(0).toLocaleUpperCase("vi")}</span>
+              <div>
+                <strong>{profile.name}</strong>
+                <p>{profile.email}</p>
+                {profile.phone && <p>{profile.phone}</p>}
+              </div>
+            </div>
+          </section>
+          <section className={styles.panel}>
+            <div className={styles.panelHeader}>
+              <h2>Địa chỉ mặc định</h2>
+              <Link className={styles.jumpLink} href="/profile/address">Quản lý</Link>
+            </div>
+            <p className={styles.overviewAddress}>{address || "Bạn chưa có địa chỉ giao hàng mặc định."}</p>
+          </section>
         </div>
-        {error && <p role="alert">{error}</p>}
-        {!profile && !error && <p role="status">Đang tải hồ sơ...</p>}
-        {profile && <div className="profile-card">
-          <div className="profile-avatar" aria-hidden="true">{(profile.name || profile.email).charAt(0).toUpperCase()}</div>
-          <div className="profile-details">
-            <h2>Thông tin tài khoản</h2>
-            <dl><div><dt>Họ và tên</dt><dd>{profile.name}</dd></div><div><dt>Email</dt><dd>{profile.email}</dd></div><div><dt>Địa chỉ mặc định</dt><dd>{address || "Chưa cập nhật"}</dd></div><div><dt>Trạng thái</dt><dd><span className="profile-status">Đang đăng nhập</span></dd></div></dl>
-          </div>
-        </div>}
-        <div className="profile-shortcuts">
-          <Link href="/profile/edit"><span>✎</span><strong>Chỉnh sửa hồ sơ</strong><small>Cập nhật tên hiển thị</small></Link>
-          <Link href="/profile/address"><span>⌖</span><strong>Sổ địa chỉ</strong><small>Quản lý địa chỉ giao hàng</small></Link>
-          <Link href="/orders"><span>▤</span><strong>Đơn hàng của tôi</strong><small>Xem và theo dõi đơn hàng</small></Link>
-          <Link href="/wishlist"><span>♡</span><strong>Sản phẩm yêu thích</strong><small>Xem danh sách bạn đã lưu</small></Link>
-        </div>
-      </section>
-    </div>
+      )}
+      <nav className={styles.quickLinks} aria-label="Thao tác nhanh">
+        <Link className={styles.secondary} href="/orders">Đơn hàng của tôi</Link>
+        <Link className={styles.secondary} href="/wishlist">Sản phẩm yêu thích</Link>
+      </nav>
+    </AccountLayout>
   );
 }

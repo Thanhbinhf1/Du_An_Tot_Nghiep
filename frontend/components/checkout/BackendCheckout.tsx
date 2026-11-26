@@ -15,9 +15,9 @@ import {
   type ShippingAddress,
   type ShippingAddressInput,
 } from "@/lib/address-api";
-import { createBackendOrder, getCheckoutQuote, type CheckoutQuote, type PaymentMethod, type ShippingMethod } from "@/lib/order-api";
+import { createBackendOrder, getCheckoutQuote, type CheckoutQuote, type CreateOrderRequest, type PaymentMethod, type ShippingMethod } from "@/lib/order-api";
+import { ApiError } from "@/lib/api";
 import { createOnlineCheckout } from "@/lib/online-checkout";
-import { getPaymentMethods } from "@/lib/payment-api";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 import { formatVnd } from "@/data/products";
 import PaymentMethodSelector from "./PaymentMethodSelector";
@@ -58,20 +58,17 @@ function CheckoutContent({ token }: { token: string }) {
 
   const [deliveryMethod, setDeliveryMethod] = useState<ShippingMethod>("Standard");
   const [preferredPaymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
-  const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [note, setNote] = useState("");
 
   const [couponCode, setCouponCode] = useState("");
   const [requestedCoupon, setRequestedCoupon] = useState("");
-  const [quoteResult, setQuoteResult] = useState<{ key: string; data?: CheckoutQuote; error?: string }>();
+  const [quoteResult, setQuoteResult] = useState<{ key: string; addressId: string; data?: CheckoutQuote; error?: string }>();
   const [quoteRevision, setQuoteRevision] = useState(0);
-  const quoteKey = JSON.stringify([deliveryMethod, requestedCoupon, quoteRevision]);
-  const quote = quoteResult?.key === quoteKey ? quoteResult.data : undefined;
-  const availableMethods = methods.filter((method) => {
-    if (quote?.final_amount === 0) return method === "COD";
-    if (method === "MoMo" && quote) return quote.final_amount >= 1_000 && quote.final_amount <= 50_000_000;
-    return true;
-  });
+  const [refreshingCart, setRefreshingCart] = useState(false);
+  const quoteKey = JSON.stringify([addressId, deliveryMethod, requestedCoupon, quoteRevision]);
+  const quote = !refreshingCart && quoteResult?.key === quoteKey ? quoteResult.data : undefined;
+  const expressAvailable = quoteResult?.addressId === addressId && quoteResult.data?.express_available;
+  const availableMethods = quote?.payment_methods ?? [];
   const paymentMethod = availableMethods.includes(preferredPaymentMethod) ? preferredPaymentMethod : "COD";
   const quoteError = quoteResult?.key === quoteKey ? quoteResult.error : undefined;
 
@@ -79,6 +76,7 @@ function CheckoutContent({ token }: { token: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [createdOrder, setCreatedOrder] = useState<CreatedOrder | null>(null);
+  const [retryRequest, setRetryRequest] = useState<CreateOrderRequest | null>(null);
   const [completedCOD, setCompletedCOD] = useState(false);
 
   const busy = useRef(false);
@@ -86,13 +84,12 @@ function CheckoutContent({ token }: { token: string }) {
   useEffect(() => {
     let active = true;
 
-    Promise.all([getBackendCart(token), getShippingAddresses(token), getPaymentMethods(token)])
-      .then(([cartData, addressData, paymentMethods]) => {
+    Promise.all([getBackendCart(token), getShippingAddresses(token)])
+      .then(([cartData, addressData]) => {
         if (!active) return;
 
         setCart(cartData);
         setAddresses(addressData);
-        setMethods(paymentMethods);
         const defaultAddr = addressData.find((item) => item.is_default) ?? addressData[0];
         if (defaultAddr) setAddressId(defaultAddr._id);
         setError("");
@@ -111,23 +108,62 @@ function CheckoutContent({ token }: { token: string }) {
   }, [token]);
 
   useEffect(() => {
-    if (loading || !cart?.items.length || createdOrder) return;
+    if (loading || refreshingCart || !cart?.items.length || !addressId || createdOrder) return;
     const controller = new AbortController();
-    getCheckoutQuote({ shipping_method: deliveryMethod, coupon_code: requestedCoupon }, token, controller.signal)
+    getCheckoutQuote({ address_id: addressId, shipping_method: deliveryMethod, coupon_code: requestedCoupon }, token, controller.signal)
       .then((data) => {
-        if (!controller.signal.aborted) setQuoteResult({ key: quoteKey, data });
+        if (!Array.isArray(data.cart_lines) || !/^[a-f0-9]{64}$/.test(data.cart_snapshot ?? "")) {
+          throw new Error("Không thể đối chiếu giỏ hàng với báo giá. Vui lòng kiểm tra lại.");
+        }
+        const lines = new Map(data.cart_lines.map((line) => [line.id, line]));
+        const matches = lines.size === cart.items.length && cart.items.every((item) => {
+          const line = lines.get(item._id);
+          const variant = item.product_variant_id;
+          return line && variant && line.variant_id === variant._id &&
+            line.sku === variant.sku && line.size === variant.size && line.color === variant.color &&
+            line.quantity === item.quantity && line.unit_price === item.price;
+        });
+        if (!matches) throw new Error("Giỏ hàng đã thay đổi. Hãy cập nhật giỏ hàng và kiểm tra lại các sản phẩm.");
+        if (!controller.signal.aborted) {
+          const confirmedAddress = data.address;
+          if (confirmedAddress) setAddresses((current) => current.map((address) => address._id === confirmedAddress._id ? { ...address, ...confirmedAddress } : address));
+          setQuoteResult({ key: quoteKey, addressId, data });
+        }
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) {
-          setQuoteResult({ key: quoteKey, error: cause instanceof Error ? cause.message : "Không thể kiểm tra tổng tiền." });
+          setQuoteResult({ key: quoteKey, addressId, error: cause instanceof Error ? cause.message : "Không thể kiểm tra tổng tiền." });
         }
       });
     return () => controller.abort();
-  }, [cart, createdOrder, deliveryMethod, loading, quoteKey, requestedCoupon, token]);
+  }, [addressId, cart, createdOrder, deliveryMethod, loading, quoteKey, refreshingCart, requestedCoupon, token]);
+
+  function selectAddress(id: string) {
+    setAddressId(id);
+    setDeliveryMethod("Standard");
+  }
 
   function handleApplyCoupon() {
     setRequestedCoupon(couponCode.trim().toUpperCase());
     setQuoteRevision((value) => value + 1);
+  }
+
+  async function refreshCheckoutCart() {
+    setRefreshingCart(true);
+    try {
+      const [cartData, addressData] = await Promise.all([getBackendCart(token), getShippingAddresses(token)]);
+      setCart(cartData);
+      setAddresses(addressData);
+      if (!addressData.some((address) => address._id === addressId)) {
+        selectAddress((addressData.find((address) => address.is_default) ?? addressData[0])?._id ?? "");
+      }
+      setQuoteRevision((value) => value + 1);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Không tải lại được giỏ hàng.");
+    } finally {
+      setRefreshingCart(false);
+    }
   }
 
   async function handleSaveNewAddress(event: FormEvent<HTMLFormElement>) {
@@ -137,7 +173,7 @@ function CheckoutContent({ token }: { token: string }) {
     try {
       const saved = await saveShippingAddress(token, newAddress);
       setAddresses((prev) => [saved, ...prev]);
-      setAddressId(saved._id);
+      selectAddress(saved._id);
       setShowNewAddressModal(false);
       setNewAddress(emptyShippingAddress);
     } catch (cause) {
@@ -170,7 +206,8 @@ function CheckoutContent({ token }: { token: string }) {
   }
 
   async function handleSubmit() {
-    if (busy.current || (!createdOrder && (!quote || !cart?.items.length || !addressId || !methods.includes(paymentMethod)))) {
+    const canPlaceOrder = quote && cart?.items.length && addressId && availableMethods.includes(paymentMethod);
+    if (busy.current || (!createdOrder && !retryRequest && !canPlaceOrder)) {
       return;
     }
 
@@ -182,31 +219,39 @@ function CheckoutContent({ token }: { token: string }) {
       let order = createdOrder;
 
       if (!order) {
-        if (!quote) return;
-        const response = await createBackendOrder(
-          {
+        const request = retryRequest ?? (quote ? {
             address_id: addressId,
             payment_method: paymentMethod,
             note: note.trim(),
             shipping_method: deliveryMethod,
             coupon_code: requestedCoupon,
             expected_total: quote.final_amount,
-          },
-          token,
-        );
+            expected_cart_snapshot: quote.cart_snapshot,
+        } : null);
+        if (!request) return;
+        setRetryRequest(request);
+        const response = await createBackendOrder(request, token);
+        setRetryRequest(null);
+        notifyCartChanged();
+        if (response.order_status !== "pending" || response.payment_status !== "pending") {
+          router.push(`/orders/${encodeURIComponent(response.order_id)}`);
+          return;
+        }
 
         order = {
           id: response.order_id,
-          method: paymentMethod,
+          method: response.payment_method,
         };
 
         setCreatedOrder(order);
-        notifyCartChanged();
       }
 
       await continuePayment(order);
     } catch (cause) {
-      if (!createdOrder) setQuoteRevision((value) => value + 1);
+      if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500) {
+        setRetryRequest(null);
+        if (!createdOrder) setQuoteRevision((value) => value + 1);
+      }
       setError(cause instanceof Error ? cause.message : "Không thể hoàn tất đơn hàng.");
     } finally {
       busy.current = false;
@@ -224,6 +269,9 @@ function CheckoutContent({ token }: { token: string }) {
 
   return (
     <section className="container checkout-page" style={{ paddingBottom: 64 }}>
+      <nav className="breadcrumb store-purchase-path" aria-label="Vị trí trong cửa hàng">
+        <Link href="/cart">Giỏ hàng</Link> <span aria-hidden="true">/</span> <span aria-current="page">Thanh toán</span>
+      </nav>
       <h1 className="page-title">Xác nhận đơn hàng & Thanh toán</h1>
 
       {error && (
@@ -249,7 +297,7 @@ function CheckoutContent({ token }: { token: string }) {
 
           <p style={{ margin: "16px 0", color: "#555" }}>
             {completedCOD
-              ? "Cảm ơn bạn đã mua sắm tại F.Style! Đơn hàng COD của bạn đang chờ xác nhận."
+              ? "Cảm ơn bạn đã mua sắm tại VSC_BAPD! Đơn hàng COD của bạn đang chờ xác nhận."
               : "Vui lòng hoàn tất thanh toán để đơn hàng được xử lý ngay lập tức."}
           </p>
 
@@ -327,7 +375,7 @@ function CheckoutContent({ token }: { token: string }) {
                           name="shipping_address_id"
                           value={addr._id}
                           checked={isSelected}
-                          onChange={() => setAddressId(addr._id)}
+                          onChange={() => selectAddress(addr._id)}
                           style={{ marginTop: 4, accentColor: "#111" }}
                         />
                         <div style={{ flex: 1, fontSize: 13 }}>
@@ -384,7 +432,7 @@ function CheckoutContent({ token }: { token: string }) {
                   />
                   <div style={{ flex: 1 }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <strong>Giao hàng Tiêu chuẩn (2 - 4 ngày)</strong>
+                      <strong>Giao hàng Tiêu chuẩn</strong>
                       <strong>{quote ? (quote.standard_shipping_fee === 0 ? "Miễn phí" : formatVnd(quote.standard_shipping_fee)) : "—"}</strong>
                     </div>
                     <span className="small muted">
@@ -393,7 +441,7 @@ function CheckoutContent({ token }: { token: string }) {
                   </div>
                 </label>
 
-                <label
+                {expressAvailable && <label
                   className="panel"
                   style={{
                     display: "flex",
@@ -414,12 +462,14 @@ function CheckoutContent({ token }: { token: string }) {
                   />
                   <div style={{ flex: 1 }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <strong>Giao hàng Hỏa tốc (1 - 2 ngày)</strong>
+                      <strong>Giao hàng Hỏa tốc</strong>
                       <strong>{quote ? formatVnd(quote.express_shipping_fee) : "—"}</strong>
                     </div>
-                    <span className="small muted">Ưu tiên xử lý đóng gói và giao nhanh trong vòng 24 - 48h</span>
                   </div>
-                </label>
+                </label>}
+                {addressId && quote && !quote.express_available && (
+                  <p className="small muted">Địa chỉ này hiện hỗ trợ giao tiêu chuẩn.</p>
+                )}
               </div>
             </section>
 
@@ -428,7 +478,7 @@ function CheckoutContent({ token }: { token: string }) {
               value={paymentMethod}
               onChange={setPaymentMethod}
               available={availableMethods}
-              configured={methods}
+              configured={quote?.configured_payment_methods ?? []}
             />
 
             {/* 4. GHI CHÚ ĐƠN HÀNG */}
@@ -499,7 +549,7 @@ function CheckoutContent({ token }: { token: string }) {
                             fontSize: 10,
                           }}
                         >
-                          F.Style
+                          VSC_BAPD
                         </div>
                       )}
 
@@ -522,7 +572,7 @@ function CheckoutContent({ token }: { token: string }) {
 
             {/* MÃ GIẢM GIÁ */}
             <div className="panel" style={{ marginBottom: 16 }}>
-              <strong style={{ display: "block", marginBottom: 8, fontSize: 13 }}>Mã giảm giá F.Style</strong>
+              <strong style={{ display: "block", marginBottom: 8, fontSize: 13 }}>Mã giảm giá VSC_BAPD</strong>
               <div style={{ display: "flex", gap: 8 }}>
                 <input
                   type="text"
@@ -559,7 +609,9 @@ function CheckoutContent({ token }: { token: string }) {
               {quoteError && (
                 <p role="alert" style={{ margin: "6px 0 0", color: "#b42318", fontSize: 12 }}>
                   {quoteError}{" "}
-                  <button type="button" className="text-button" onClick={() => setQuoteRevision((value) => value + 1)}>Kiểm tra lại</button>
+                  <button type="button" className="text-button" disabled={refreshingCart || submitting} onClick={() => void refreshCheckoutCart()}>
+                    {refreshingCart ? "Đang cập nhật…" : "Cập nhật giỏ hàng"}
+                  </button>
                 </p>
               )}
             </div>
@@ -592,10 +644,7 @@ function CheckoutContent({ token }: { token: string }) {
               className="pill-button dark place-order-button"
               disabled={
                 submitting ||
-                !quote ||
-                !cart?.items.length ||
-                !addressId ||
-                !methods.includes(paymentMethod)
+                (!retryRequest && (!quote || !cart?.items.length || !addressId || !availableMethods.includes(paymentMethod)))
               }
               onClick={handleSubmit}
               style={{
@@ -608,13 +657,13 @@ function CheckoutContent({ token }: { token: string }) {
             >
               {submitting
                 ? "Đang xử lý đơn hàng..."
-                : paymentMethod === "COD"
+                : retryRequest ? "Kiểm tra lại yêu cầu đặt hàng" : paymentMethod === "COD"
                   ? "Đặt hàng ngay (COD)"
                   : `Thanh toán qua ${paymentMethod}`}
             </button>
 
             <p className="small muted" style={{ marginTop: 12, textAlign: "center", lineHeight: 1.5 }}>
-              Bằng việc bấm Đặt hàng, bạn đồng ý với các điều khoản mua sắm và chính sách giao nhận của F.Style.
+              Bằng việc bấm Đặt hàng, bạn đồng ý với các điều khoản mua sắm và chính sách giao nhận của VSC_BAPD.
             </p>
           </aside>
         </div>

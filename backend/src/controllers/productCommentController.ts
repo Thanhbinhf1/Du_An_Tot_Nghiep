@@ -7,6 +7,7 @@ import Product from "../models/productModel.js";
 import ProductVariant from "../models/productVariantModel.js";
 import type { AuthRequest } from "../middlewares/authMiddleware.js";
 import { AppError } from "../middlewares/AppError.js";
+import { reviewWords, moderatedReview } from "../services/reviewModeration.js";
 
 function productKeyFromRequest(req: Request) {
   const { productKey } = req.params;
@@ -45,10 +46,11 @@ export class ProductCommentController {
       const averageRating = comments.length
         ? comments.reduce((total, comment) => total + comment.rating, 0) / comments.length
         : 0;
+      const words = await reviewWords();
       res.json({
         status: "success",
         data: {
-          comments,
+          comments: comments.map((comment) => moderatedReview(comment, words)),
           averageRating,
           total: comments.length,
         },
@@ -65,9 +67,10 @@ export class ProductCommentController {
       const [canReview, ownReview] = await Promise.all([
         hasCompletedPurchase(productKey, req.user._id),
         ProductComment.findOne({ product_key: productKey, user_email: req.user.email })
-          .select("rating comment").lean(),
+          .select("rating comment mask_all").lean(),
       ]);
-      res.json({ status: "success", data: { canReview, ownReview } });
+      const words = await reviewWords();
+      res.json({ status: "success", data: { canReview, ownReview: ownReview ? moderatedReview(ownReview, words) : null } });
     } catch (error) {
       next(error);
     }
@@ -97,6 +100,9 @@ export class ProductCommentController {
             user_name: req.user.name,
             rating,
             comment: comment.trim(),
+            mask_all: false,
+            moderated_by: null,
+            moderated_at: null,
           },
           $setOnInsert: {
             product_key: productKey,
@@ -106,7 +112,7 @@ export class ProductCommentController {
         { returnDocument: "after", upsert: true, runValidators: true, setDefaultsOnInsert: true },
       ).select("-user_email");
 
-      res.status(200).json({ status: "success", data: saved });
+      res.status(200).json({ status: "success", data: saved ? moderatedReview(saved.toObject(), await reviewWords()) : null });
     } catch (error) {
       next(error);
     }
