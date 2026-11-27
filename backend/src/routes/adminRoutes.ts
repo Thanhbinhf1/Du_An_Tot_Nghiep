@@ -25,6 +25,37 @@ const router = Router();
 router.use(normalizeRequestBody);
 
 
+const videoExtensions: Record<string, string> = {
+  "video/mp4": ".mp4",
+  "video/webm": ".webm",
+  "video/quicktime": ".mov",
+};
+
+function validateVideoContent(buffer: Buffer, mimetype: string) {
+  const ext = videoExtensions[mimetype];
+  if (!ext || buffer.length < 12) {
+    throw new AppError("Chỉ chấp nhận video ngắn định dạng MP4, WEBM hoặc MOV.", 400);
+  }
+  const isMp4OrMov = buffer.subarray(4, 8).toString("ascii") === "ftyp";
+  const isWebm = buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3;
+  if ((mimetype === "video/webm" && !isWebm) || (mimetype !== "video/webm" && !isMp4OrMov)) {
+    throw new AppError("Tệp video không hợp lệ hoặc bị hỏng.", 400);
+  }
+  return ext;
+}
+
+const uploadVideo = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    if (!videoExtensions[file.mimetype]) {
+      callback(new AppError("Chỉ chấp nhận video MP4, WEBM hoặc MOV (tối đa 25 MB).", 400));
+      return;
+    }
+    callback(null, true);
+  },
+});
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
@@ -133,6 +164,20 @@ router.post("/uploads", requireAdmin, upload.single("image"), async (req, res, n
   }
   try {
     const extension = validateImageContent(req.file.buffer, req.file.mimetype);
+    const filename = `${randomUUID()}${extension}`;
+    await mkdir(uploadDirectory, { recursive: true });
+    await writeFile(path.join(uploadDirectory, filename), req.file.buffer, { flag: "wx" });
+    res.status(201).json({ status: "success", data: { url: `/uploads/${filename}` } });
+  } catch (error) { next(error); }
+});
+
+router.post("/uploads/video", requireAdmin, uploadVideo.single("video"), async (req, res, next) => {
+  if (!req.file) {
+    next(new AppError("Vui lòng chọn video ngắn để tải lên.", 400));
+    return;
+  }
+  try {
+    const extension = validateVideoContent(req.file.buffer, req.file.mimetype);
     const filename = `${randomUUID()}${extension}`;
     await mkdir(uploadDirectory, { recursive: true });
     await writeFile(path.join(uploadDirectory, filename), req.file.buffer, { flag: "wx" });

@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import Header from "./Header";
+import StorefrontChat from "@/components/chat/StorefrontChat";
 
 export default function StorefrontChrome({ children, footer }: { children: ReactNode; footer: ReactNode }) {
   const pathname = usePathname();
@@ -13,6 +14,7 @@ export default function StorefrontChrome({ children, footer }: { children: React
       {!isAdmin && <Header />}
       {children}
       {!isAdmin && footer}
+      {!isAdmin && <StorefrontChat />}
     </>
   );
 }

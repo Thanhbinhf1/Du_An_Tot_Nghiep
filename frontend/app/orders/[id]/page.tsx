@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useDemoAuth } from "@/lib/demo-auth";
 import CancelOrderButton from "@/components/orders/CancelOrderButton";
+import RequestReturnButton from "@/components/orders/RequestReturnButton";
 import { formatVnd } from "@/data/products";
 import {
   getBackendOrder,
@@ -24,21 +25,21 @@ const steps = [
 
 export default function OrderDetailsPage() {
   const { id } = useParams<{ id: string }>();
-  const { token, isHydrated } = useDemoAuth();
+  const { token, account, isHydrated } = useDemoAuth();
   if (!isHydrated) return <div className="container" style={{ padding: 40 }}><p role="status">Đang kiểm tra đăng nhập...</p></div>;
   if (!token) {
     return (
-      <div className="container" style={{ padding: 40 }}>
-        <p>
-          Vui lòng <Link href="/dang-nhap" style={{ textDecoration: "underline" }}>đăng nhập</Link> để xem chi tiết đơn hàng.
-        </p>
-      </div>
+      <section className="container store-state">
+        <h1 className="page-title">Chi tiết đơn hàng</h1>
+        <p>Vui lòng đăng nhập để xem chi tiết và tiến trình đơn hàng của bạn.</p>
+        <Link href="/dang-nhap" className="pill-button dark-pill">Đăng nhập ngay</Link>
+      </section>
     );
   }
-  return <OrderDetails key={`${id}:${token}`} id={id} token={token} />;
+  return <OrderDetails key={`${id}:${token}`} id={id} token={token} userEmail={account} />;
 }
 
-function OrderDetails({ id, token }: { id: string; token: string }) {
+function OrderDetails({ id, token, userEmail }: { id: string; token: string; userEmail?: string }) {
   const router = useRouter();
   const [order, setOrder] = useState<BackendOrderDetail>();
   const [error, setError] = useState("");
@@ -208,6 +209,15 @@ function OrderDetails({ id, token }: { id: string; token: string }) {
                 )}
                 {canCancel && (
                   <CancelOrderButton orderId={id} token={token} onCancelled={handleCancelled} />
+                )}
+                {order.order_status === "completed" && (
+                  <RequestReturnButton
+                    orderId={order._id}
+                    receiverName={order.receiver_name}
+                    userEmail={userEmail}
+                    token={token}
+                    onSubmitted={(ticketId) => setCancelMessage(`Đã gửi yêu cầu đổi/trả hàng thành công (Mã hồ sơ: ${ticketId}).`)}
+                  />
                 )}
                 {["SePay", "MoMo", "BankTransfer"].includes(order.payment_method) && (
                   <Link

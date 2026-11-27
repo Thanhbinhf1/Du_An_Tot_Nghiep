@@ -9,6 +9,7 @@ const accountLinks = [
   { id: "password", href: "/profile/password", label: "Đổi mật khẩu", icon: "M6 10V8a6 6 0 1 1 12 0v2M4 10h16v11H4zM12 15v2" },
   { id: "orders", href: "/orders", label: "Đơn hàng", icon: "M5 8h14l1 13H4L5 8Zm4 2V6a3 3 0 0 1 6 0v4" },
   { id: "wishlist", href: "/wishlist", label: "Yêu thích", icon: "M20 5a5 5 0 0 0-8 1 5 5 0 0 0-8-1c-5 4 1 10 8 15 7-5 13-11 8-15Z" },
+  { id: "reviews", href: "/profile/reviews", label: "Đánh giá của tôi", icon: "m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z" },
 ] as const;
 
 type AccountSection = (typeof accountLinks)[number]["id"];

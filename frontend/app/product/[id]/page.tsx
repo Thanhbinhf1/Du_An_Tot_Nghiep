@@ -14,6 +14,7 @@ import { API_BASE_URL, mapApiProduct, readApiResponse, type ApiProduct } from "@
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 import { getColorSwatch } from "@/lib/product-colors";
 import { recommendOutfitProducts } from "@/lib/product-recommendations";
+import { registerChatProduct } from "@/components/chat/product-context";
 
 import "./product.css";
 
@@ -113,6 +114,7 @@ function ProductDetails({ product, initialColor, initialSize }: { product: Detai
   const colors = [...new Set(product.variants.map((item) => item.color))];
   const variant = product.variants.find((item) => item._id === variantId);
   const activeColor = variant?.color ?? selectedColor ?? colors[0] ?? "";
+  useEffect(() => registerChatProduct(product.id, activeColor), [product.id, activeColor]);
   const sizesForColor = product.variants.filter((item) => item.color === activeColor);
   const stock = variant?.stock_quantity ?? 0;
 
@@ -337,7 +339,7 @@ function ProductDetails({ product, initialColor, initialSize }: { product: Detai
                 {!variant
                   ? "Vui lòng chọn kích cỡ để kiểm tra tồn kho"
                   : stock > 0
-                    ? `Còn ${stock} sản phẩm`
+                    ? "Còn hàng"
                     : "Biến thể này đã hết hàng"}
               </p>
 

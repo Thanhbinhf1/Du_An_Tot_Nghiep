@@ -8,6 +8,7 @@ import ProductVariant from "../models/productVariantModel.js";
 import type { AuthRequest } from "../middlewares/authMiddleware.js";
 import { AppError } from "../middlewares/AppError.js";
 import { reviewWords, moderatedReview } from "../services/reviewModeration.js";
+import { readPagination, paginationMetadata } from "../services/listQuery.js";
 
 function productKeyFromRequest(req: Request) {
   const { productKey } = req.params;
@@ -36,6 +37,28 @@ async function hasCompletedPurchase(productKey: string, userId: Types.ObjectId) 
 }
 
 export class ProductCommentController {
+  static async getMine(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError("Vui lòng đăng nhập để xem đánh giá.", 401);
+      const { page, limit, skip } = readPagination(req.query);
+      const owner = { user_email: req.user.email };
+      const [reviews, total, words] = await Promise.all([
+        ProductComment.find(owner).select("product_key rating comment mask_all").sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+        ProductComment.countDocuments(owner),
+        reviewWords(),
+      ]);
+      const ids = reviews.map((review) => review.product_key).filter((id) => isObjectIdOrHexString(id));
+      const products = await Product.find({ _id: { $in: ids }, status: true }).select("name").lean();
+      const names = new Map(products.map((product) => [String(product._id), product.name]));
+      const data = reviews.map((review) => ({
+        _id: review._id, productId: names.has(review.product_key) ? review.product_key : null,
+        productName: names.get(review.product_key) ?? "Sản phẩm đã ngừng hiển thị",
+        rating: review.rating, comment: moderatedReview(review, words).comment,
+      }));
+      res.set("Cache-Control", "private, no-store").json({ status: "success", data, pagination: paginationMetadata(page, limit, total) });
+    } catch (error) { next(error); }
+  }
+
   static async getForProduct(req: Request, res: Response, next: NextFunction) {
     try {
       const productKey = productKeyFromRequest(req);

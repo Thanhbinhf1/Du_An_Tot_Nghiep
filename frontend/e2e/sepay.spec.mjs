@@ -2,7 +2,7 @@ import { test, expect, api, state, db, oid, signIn, token, emptyCart, add, order
 
 function transaction(payment, amount) {
   return { id: Date.now(), gateway: "VietinBank", accountNumber: payment.sepay_account_number,
-    content: "SEVQR " + payment.sepay_payment_code, transferType: "in", transferAmount: amount,
+    code: payment.sepay_payment_code, content: "SEVQR " + payment.sepay_payment_code, transferType: "in", transferAmount: amount,
     referenceCode: "QA-" + payment._id };
 }
 
@@ -37,7 +37,14 @@ test("SEPAY-001 QR đúng tài khoản và số tiền, đơn tự cập nhật 
   expect(qr.searchParams.get("des")).toBe(transfer.content);
   await page.getByRole("button", { name: "Tôi đã chuyển khoản" }).click();
   await expect(page.getByText(/Chưa ghi nhận khoản thanh toán/)).toBeVisible();
-  for (let attempt = 0; attempt < 2; attempt++) expect((await notify(transfer)).status).toBe(200);
+  const unmatched = await notify({ ...transfer, code: null });
+  expect(await unmatched.json()).toEqual({ success: false });
+  expect((await db.collection("orders").findOne({ _id: oid(id) })).payment_status).toBe("pending");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const delivered = await notify(transfer);
+    expect(delivered.status).toBe(200);
+    expect(await delivered.json()).toEqual({ success: true });
+  }
   await expect(page.getByRole("heading", { name: "Thanh toán thành công" })).toBeVisible({ timeout: 12000 });
   expect(await db.collection("payments").countDocuments({ order_id: oid(id), status: "success" })).toBe(1);
 });

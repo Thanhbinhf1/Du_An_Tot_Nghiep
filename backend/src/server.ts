@@ -23,6 +23,7 @@ import productCommentRoutes from "./routes/productCommentRoutes.js";
 import couponRoutes from "./routes/couponRoutes.js";
 import brandRoutes from "./routes/brandRoutes.js";
 import cartRoutes from "./routes/cartRoutes.js";
+import chatRoutes from "./routes/chatRoutes.js";
 import addressRoutes from "./routes/addressRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
@@ -35,6 +36,7 @@ const app: Application = express();
 
 // Middlewares
 app.use(cors());
+app.use("/api/chat", chatRoutes);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(

@@ -231,12 +231,12 @@ function SizeConsultation({ scope, products, productsLoading, productsError, set
       </details>}
     </section>
     <aside className="size-assistance">
-      <MeasurementGuide />
       <section className="size-result" ref={results} tabIndex={-1} aria-labelledby="size-result-title" aria-live="polite" aria-busy={loading}>
         <h2 id="size-result-title">Kết quả tư vấn</h2>
         {loading ? <div className="size-skeleton" role="status" aria-label="Đang tính kích cỡ" />
           : <SizeRecommendationResult result={result} fit={fit} edit={() => form.current?.querySelector<HTMLInputElement>('input[type="number"]')?.focus()} />}
       </section>
+      <MeasurementGuide />
     </aside>
     {result?.sizes[0] && <RecommendedProducts result={result} products={products} loading={productsLoading} error={productsError} />}
   </>;

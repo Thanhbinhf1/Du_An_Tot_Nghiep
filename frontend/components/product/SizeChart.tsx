@@ -10,12 +10,42 @@ type Unit = "cm" | "in";
 const number = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 });
 
 export function MeasurementIllustration({ type, fit }: { type: "shirt" | "trousers" | "body"; fit?: "Slim" | "Regular" | "Oversize" }) {
-  return <span aria-hidden="true" className={`measurement-illustration ${type}${fit ? ` fit-${fit.toLowerCase()}` : ""}`}>
-    <span className="measure-garment" />
-    {!fit && <><span className="measure-line across" />
-      {type === "body" ? <span className="measure-line waist" /> : <span className="measure-line length" />}
-      {type !== "shirt" && <span className="measure-line hip" />}</>}
-  </span>;
+  if (type === "trousers") {
+    return (
+      <svg aria-hidden="true" className={`measurement-svg${fit ? ` fit-${fit.toLowerCase()}` : ""}`} viewBox="0 0 80 80" fill="none">
+        <path d="M24 12h32l5 56H45l-5-30-5 30H19l5-56Z" stroke="#111" strokeWidth="1.5" strokeLinejoin="round" fill="#fff" />
+        <path d="M24 18h32" stroke="#111" strokeWidth="1.2" />
+        {!fit && (
+          <>
+            <path d="M24 27h32" stroke="#888" strokeWidth="1.2" strokeDasharray="3 2" />
+            <path d="M68 12v56" stroke="#888" strokeWidth="1.2" />
+            <path d="M65 15l3-3 3 3M65 65l3 3 3-3" stroke="#888" strokeWidth="1.2" />
+          </>
+        )}
+      </svg>
+    );
+  }
+  if (type === "body") {
+    return (
+      <svg aria-hidden="true" className="measurement-svg" viewBox="0 0 80 80" fill="none">
+        <circle cx="40" cy="14" r="6" stroke="#111" strokeWidth="1.5" fill="#fff" />
+        <path d="M27 28c0-3 5-5 13-5s13 2 13 5l3 18h-7l-2 22H33l-2-22h-7l3-18Z" stroke="#111" strokeWidth="1.5" strokeLinejoin="round" fill="#fff" />
+        <path d="M28 33h24M30 43h20M31 53h18" stroke="#888" strokeWidth="1.2" strokeDasharray="3 2" />
+      </svg>
+    );
+  }
+  return (
+    <svg aria-hidden="true" className={`measurement-svg${fit ? ` fit-${fit.toLowerCase()}` : ""}`} viewBox="0 0 80 80" fill="none">
+      <path d="M26 15l7-3a7 7 0 0 0 14 0l7 3 14 14-8 9-6-6v36H26V32l-6 6-8-9 14-14Z" stroke="#111" strokeWidth="1.5" strokeLinejoin="round" fill="#fff" />
+      {!fit && (
+        <>
+          <path d="M26 42h28" stroke="#888" strokeWidth="1.2" strokeDasharray="3 2" />
+          <path d="M65 15v53" stroke="#888" strokeWidth="1.2" />
+          <path d="M62 18l3-3 3 3M62 65l3 3 3-3" stroke="#888" strokeWidth="1.2" />
+        </>
+      )}
+    </svg>
+  );
 }
 
 export function MeasurementGuide({ compact = false }: { compact?: boolean }) {

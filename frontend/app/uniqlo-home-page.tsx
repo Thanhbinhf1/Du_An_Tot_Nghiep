@@ -12,17 +12,13 @@ import { getAudienceName } from "@/lib/catalog-audience";
 import { useCatalogCategories } from "@/lib/useCatalogCategories";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
 import { useCatalogOutfits } from "@/lib/useCatalogOutfits";
+import { formatVnd } from "@/data/products";
 import type { Product } from "@/types/product";
 import "./home.css";
 
 const categoryOrder = ["ao-khoac", "ao-thun", "ao-so-mi", "quan-jeans", "quan-kaki", "chan-vay", "ao-hoodie", "quan-short", "vay"];
 const categoryRank = new Map(categoryOrder.map((slug, index) => [slug, index]));
-const departments = [
-  { label: "Nữ", slug: "nu" },
-  { label: "Nam", slug: "nam" },
-  { label: "Trẻ em", slug: "tre-em" },
-  { label: "Em bé", slug: "em-be" },
-];
+
 const shoppingHelp = [
   { title: "Tư vấn chọn size", copy: "Tìm kích cỡ theo số đo của bạn", href: "/tu-van-size" },
   { title: "Giao hàng", copy: "Xem thời gian và phí giao hàng", href: "/shipping" },
@@ -34,10 +30,36 @@ const storefrontPhotos: BannerSlide[] = [
   { src: "/images/auth/auth-fashion.png", alt: "Trang phục tông trung tính trên giá treo trong studio", position: "50% 56%" },
 ];
 
-function collectionSlides(products: Product[], defaults: BannerSlide[]) {
-  const photos = products.filter((product) => product.image && product.inStock)
-    .map((product) => ({ src: product.image, alt: product.name, product: { name: product.name, href: `/product/${product.id}` } }));
-  return [...new Map([defaults[0], ...photos, ...defaults.slice(1)].map((slide) => [slide.src, slide])).values()].slice(0, 3);
+function collectionSlides(
+  products: Product[],
+  defaults: BannerSlide[],
+  badge: string,
+  customMedia?: string,
+): BannerSlide[] {
+  const resolvedMedia = customMedia ? resolveProductImage(customMedia) : "";
+  const featured = products.filter((product) => product.image && product.inStock).slice(0, 3);
+  if (!featured.length) {
+    return resolvedMedia
+      ? [{ src: resolvedMedia, alt: badge, position: "50% 50%" }]
+      : defaults;
+  }
+  return featured.map((product, idx) => {
+    const fallbackBg = defaults[idx % defaults.length];
+    const isSale = Boolean(product.originalPrice && product.originalPrice > product.price);
+    return {
+      src: (idx === 0 && resolvedMedia) ? resolvedMedia : (fallbackBg?.src || product.image),
+      alt: product.name,
+      position: fallbackBg?.position || "50% 25%",
+      product: {
+        name: product.name,
+        href: `/product/${product.id}`,
+        description: product.description?.slice(0, 110) || undefined,
+        price: formatVnd(product.price),
+        originalPrice: isSale && product.originalPrice ? formatVnd(product.originalPrice) : undefined,
+        badge: isSale ? "ƯU ĐÃI CÓ HẠN" : badge,
+      },
+    };
+  });
 }
 
 function isAdultFashion(product: Product) {
@@ -85,36 +107,36 @@ function Collection({
     <section className="home-collection" id={id} aria-labelledby={`${id}-title`} aria-busy={loading}>
       {slides && <BannerCarousel slides={slides} label={`banner ${title.toLocaleLowerCase("vi")}`} className="home-collection-banner" />}
       <div className={`home-section${slides ? " home-collection-content" : ""}`}>
-      <div className="home-section-heading">
-        <h2 id={`${id}-title`}>{title}</h2>
-        <div className="home-section-controls">
-          {href && <Link className="home-text-link" href={href}>Xem tất cả <span aria-hidden="true">↗</span></Link>}
-          {(scrollState.previous || scrollState.next) && <div className="rail-buttons">
-            <button type="button" disabled={!scrollState.previous} onClick={() => scrollProducts(-1)} aria-label={`Xem ${title.toLocaleLowerCase("vi")} trước`}>‹</button>
-            <button type="button" disabled={!scrollState.next} onClick={() => scrollProducts(1)} aria-label={`Xem thêm ${title.toLocaleLowerCase("vi")}`}>›</button>
-          </div>}
-        </div>
-      </div>
-      {loading ? (
-        <>
-          <p className="sr-only" role="status">Đang tải sản phẩm…</p>
-          <div className="home-product-skeletons" aria-hidden="true">
-            {Array.from({ length: 4 }, (_, index) => (
-              <div className="skeleton-card" key={index}>
-                <div className="skeleton-box skeleton-image" />
-                <div className="skeleton-box skeleton-line short" />
-                <div className="skeleton-box skeleton-line" />
-              </div>
-            ))}
+        <div className="home-section-heading">
+          <h2 id={`${id}-title`}>{title}</h2>
+          <div className="home-section-controls">
+            {href && <Link className="home-text-link" href={href}>Xem tất cả <span aria-hidden="true">↗</span></Link>}
+            {(scrollState.previous || scrollState.next) && <div className="rail-buttons">
+              <button type="button" disabled={!scrollState.previous} onClick={() => scrollProducts(-1)} aria-label={`Xem ${title.toLocaleLowerCase("vi")} trước`}>‹</button>
+              <button type="button" disabled={!scrollState.next} onClick={() => scrollProducts(1)} aria-label={`Xem thêm ${title.toLocaleLowerCase("vi")}`}>›</button>
+            </div>}
           </div>
-        </>
-      ) : error ? (
-        <p className="home-empty" role="alert">Chưa tải được sản phẩm. Vui lòng thử tải lại trang.</p>
-      ) : products.length ? (
-        <div className="product-grid home-product-rail" ref={rail} aria-label={title}>
-          {products.map((product) => <ProductCard key={product.id} product={product} />)}
         </div>
-      ) : <p className="home-empty">{emptyText}</p>}
+        {loading ? (
+          <>
+            <p className="sr-only" role="status">Đang tải sản phẩm…</p>
+            <div className="home-product-skeletons" aria-hidden="true">
+              {Array.from({ length: 4 }, (_, index) => (
+                <div className="skeleton-card" key={index}>
+                  <div className="skeleton-box skeleton-image" />
+                  <div className="skeleton-box skeleton-line short" />
+                  <div className="skeleton-box skeleton-line" />
+                </div>
+              ))}
+            </div>
+          </>
+        ) : error ? (
+          <p className="home-empty" role="alert">Chưa tải được sản phẩm. Vui lòng thử tải lại trang.</p>
+        ) : products.length ? (
+          <div className="product-grid home-product-rail" ref={rail} aria-label={title}>
+            {products.map((product) => <ProductCard key={product.id} product={product} />)}
+          </div>
+        ) : <p className="home-empty">{emptyText}</p>}
       </div>
     </section>
   );
@@ -122,22 +144,19 @@ function Collection({
 
 export default function HomePage() {
   const [hero, setHero] = useState(defaultStorefrontHero);
-  const [sales, setSales] = useState<{ ids: string[]; failed: boolean }>();
   useEffect(() => {
     const controller = new AbortController();
-    fetch(API_BASE_URL + "/catalog/best-sellers", { signal: controller.signal })
-      .then(readApiResponse<string[]>)
-      .then((ids) => { if (!controller.signal.aborted) setSales({ ids, failed: false }); })
-      .catch(() => { if (!controller.signal.aborted) setSales({ ids: [], failed: true }); });
     fetch(API_BASE_URL + "/storefront-content/home", { signal: controller.signal, cache: "no-store" })
       .then((response) => readApiResponse<StorefrontHero | null>(response))
       .then((content) => { if (content && !controller.signal.aborted) setHero(content); })
       .catch(() => { /* The homepage can render its built-in content while the API is unavailable. */ });
     return () => controller.abort();
   }, []);
+
   const { products, error: productError, loading } = useCatalogProducts();
   const { outfits, error: outfitError } = useCatalogOutfits();
   const { categories = [], loading: loadingCategories, error: categoryError } = useCatalogCategories();
+
   const categoryPhotos = new Map<string, string>();
   for (const product of products) {
     if (product.categoryId && product.image && !categoryPhotos.has(product.categoryId)) {
@@ -152,21 +171,20 @@ export default function HomePage() {
     (categoryRank.get(second.slug) ?? categoryOrder.length),
   );
   const homeCategories = collections.slice(0, 12);
+
   const newArrivals = products.filter((product) => product.inStock).sort((first, second) =>
     Date.parse(second.createdAt ?? "1970-01-01") - Date.parse(first.createdAt ?? "1970-01-01"),
-  ).slice(0, 10);
-  const featuredProducts = products.filter((item) => item.isFeatured)
-    .sort((first, second) => Number(isAdultFashion(second)) - Number(isAdultFashion(first)))
-    .slice(0, 10);
+  ).slice(0, 12);
+
+  const saleProducts = products.filter((item) => (item.originalPrice ?? 0) > item.price).slice(0, 12);
+
   const productsById = new Map(products.map((product) => [product.id, product]));
-  const bestSellers = (sales?.ids ?? []).flatMap((id) => productsById.get(id) ?? []);
-  const saleProducts = products.filter((item) => (item.originalPrice ?? 0) > item.price).slice(0, 10);
   const productIds = new Set(products.filter((product) => product.inStock).map((product) => product.id));
   const publishedOutfits = outfits?.filter((outfit) => outfit.product_ids.some((id) => productIds.has(id))) ?? [];
+
   const heroImage = resolveProductImage(hero.image);
-  const homeSlides = heroImage === storefrontPhotos[0].src ? storefrontPhotos : [
+  const homeSlides: BannerSlide[] = [
     { src: heroImage, alt: [hero.title, hero.accent].filter(Boolean).join(" "), position: "50% 25%" },
-    ...storefrontPhotos.filter((item) => item.src !== heroImage).slice(0, 2),
   ];
 
   return (
@@ -189,7 +207,6 @@ export default function HomePage() {
           <nav className="home-shopping" aria-labelledby="home-category-title" aria-busy={loadingCategories}>
             <div className="home-section-heading">
               <h2 id="home-category-title">Tìm theo danh mục</h2>
-              <Link className="home-text-link" href="/products">Tất cả sản phẩm <span aria-hidden="true">↗</span></Link>
             </div>
             {loadingCategories ? (
               <>
@@ -204,35 +221,54 @@ export default function HomePage() {
                 </div>
               </>
             ) : homeCategories.length > 0 ? (
-              <CategoryTiles categories={homeCategories} photos={categoryPhotos} />
+              <>
+                <CategoryTiles categories={homeCategories} photos={categoryPhotos} />
+                <div className="home-categories-cta-wrap">
+                  <Link href="/products" className="home-categories-pill-cta">
+                    XEM TẤT CẢ DANH MỤC SẢN PHẨM
+                  </Link>
+                </div>
+              </>
             ) : (
               <p className="home-empty" role="alert">Chưa tải được loại trang phục. Vui lòng thử tải lại trang.</p>
             )}
           </nav>
         )}
-        <nav className="home-departments" aria-label="Mua sắm theo nhóm">
-          {departments.map(({ slug, label }) => (
-            <Link href={`/categories/${slug}`} key={slug}>{label} <span aria-hidden="true">↗</span></Link>
-          ))}
-        </nav>
       </div>
 
-      <Collection id="san-pham-moi" title="Sản phẩm mới" href="/products?sort=newest"
-        products={newArrivals} loading={loading} error={Boolean(productError)} emptyText="Chưa có sản phẩm mới."
-        slides={collectionSlides(newArrivals, [storefrontPhotos[2], storefrontPhotos[1]])} />
+      <Collection
+        id="san-pham-moi"
+        title="Sản phẩm"
+        href="/products"
+        products={newArrivals}
+        loading={loading}
+        error={Boolean(productError)}
+        emptyText="Chưa có sản phẩm."
+        slides={collectionSlides(
+          newArrivals,
+          [storefrontPhotos[1], storefrontPhotos[0], storefrontPhotos[2]],
+          "MỚI VỀ",
+          hero.collectionVideos?.newArrivals,
+        )}
+      />
 
-      <Collection id="ban-chay" title="Bán chạy trong 30 ngày" products={bestSellers}
-        loading={loading || !sales} error={Boolean(productError || sales?.failed)}
-        emptyText="Chưa có sản phẩm từ đơn hoàn tất và đã thanh toán trong 30 ngày qua." />
-
-      <section aria-labelledby="home-collections-heading" id="bo-suu-tap">
-      <div className="home-section home-collection-intro"><h2 id="home-collections-heading">Bộ sưu tập</h2></div>
-      <Collection id="noi-bat" title="Sản phẩm nổi bật" href="/products?featured=true"
-        products={featuredProducts} loading={loading} error={Boolean(productError)} emptyText="Chưa có sản phẩm nổi bật."
-        slides={collectionSlides(featuredProducts, [{ ...storefrontPhotos[1], position: "50% 16%" }, storefrontPhotos[0]])} />
-      </section>
-        <Collection id="khuyen-mai" title="Đang ưu đãi" href="/products?status=sale"
-          products={saleProducts} loading={loading} error={Boolean(productError)} emptyText="Chưa có sản phẩm được giảm giá." />
+      {saleProducts.length > 0 && (
+        <Collection
+          id="khuyen-mai"
+          title="Đang ưu đãi"
+          href="/products?status=sale"
+          products={saleProducts}
+          loading={loading}
+          error={Boolean(productError)}
+          emptyText="Chưa có sản phẩm được giảm giá."
+          slides={collectionSlides(
+            saleProducts,
+            [storefrontPhotos[2], storefrontPhotos[1]],
+            "ƯU ĐÃI CÓ HẠN",
+            hero.collectionVideos?.sale,
+          )}
+        />
+      )}
 
       <section className="home-section home-lookbook" id="outfit" aria-labelledby="home-lookbook-title">
         <div className="home-lookbook-frame">
@@ -240,7 +276,7 @@ export default function HomePage() {
             <Image src="/images/banner/fstyle-city-walk.webp" alt="" fill sizes="(max-width: 700px) 90vw, 52vw" />
           </div>
           <div className="home-lookbook-intro">
-            <h2 id="home-lookbook-title">Mix & Match</h2>
+            <h2 id="home-lookbook-title">Mix &amp; Match</h2>
             <p>Tìm ý tưởng phối đồ và xem từng món trong bộ.</p>
             <Link href="/outfit" className="home-text-link">Khám phá cách phối <span aria-hidden="true">↗</span></Link>
           </div>
@@ -252,20 +288,21 @@ export default function HomePage() {
               const pieces = outfit.product_ids.flatMap((id) => productsById.get(id) ?? []);
               const photo = outfit.image ? resolveProductImage(outfit.image) : pieces.find((piece) => piece.image)?.image;
               return (
-              <Link className="home-outfit-card" href={`/outfit?bo-phoi=${encodeURIComponent(outfit._id)}`} key={outfit._id}>
-                {/* eslint-disable-next-line @next/next/no-img-element -- outfit images can come from the backend */}
-                {photo && <img src={photo} alt="" loading="lazy" />}
-                <div>
-                  <h3>{outfit.title} <span aria-hidden="true">↗</span></h3>
-                  <p>{pieces.map((piece) => piece.name).join(" · ")}</p>
-                  {outfit.description && <p>{outfit.description}</p>}
-                </div>
-              </Link>
+                <Link className="home-outfit-card" href={`/outfit?bo-phoi=${encodeURIComponent(outfit._id)}`} key={outfit._id}>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- outfit images can come from the backend */}
+                  {photo && <img src={photo} alt="" loading="lazy" />}
+                  <div>
+                    <h3>{outfit.title} <span aria-hidden="true">↗</span></h3>
+                    <p>{pieces.map((piece) => piece.name).join(" · ")}</p>
+                    {outfit.description && <p>{outfit.description}</p>}
+                  </div>
+                </Link>
               );
             })}
           </div>
         )}
       </section>
+
       <section className="home-section home-services" aria-label="Hỗ trợ mua sắm">
         {shoppingHelp.map(({ title, copy, href }) => (
           <Link className="home-service" key={href} href={href}>

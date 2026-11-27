@@ -4,48 +4,15 @@ import StorefrontProduct from "../models/storefrontProductModel.js";
 import { AppError } from "../middlewares/AppError.js";
 import Outfit from "../models/outfitModel.js";
 import OutfitDetail from "../models/outfitDetailModel.js";
-import SizeRecommendation, { ProductSizeChart, type SizeChartRow } from "../models/sizeRecommendationModel.js";
+import SizeRecommendation, { ProductSizeChart } from "../models/sizeRecommendationModel.js";
 import mongoose from "mongoose";
 import { getStoreInfo } from "../config/storeInfo.js";
 import Product from "../models/productModel.js";
 import ProductImage from "../models/productImageModel.js";
-import Variant from "../models/productVariantModel.js";
 import { productAudiences } from "../services/catalogAudience.js";
-import { chartMeasurements, compareSizes, matchSizeChart, readFit, readMeasurements } from "../services/sizeGuide.js";
+import { recommendCatalogSize, sizeScope } from "../services/catalogSize.js";
 import { visibleCategoryIds } from "../services/categoryPolicy.js";
 import { deliveredSales } from "../services/adminAnalytics.js";
-
-function catalogId(value: unknown, label: string) {
-  if (typeof value !== "string" || !mongoose.isObjectIdOrHexString(value)) {
-    throw new AppError(`ID ${label} không hợp lệ.`, 400);
-  }
-  return new mongoose.Types.ObjectId(value);
-}
-
-async function sizeScope(input: Record<string, unknown>) {
-  const productId = input.productId === undefined ? undefined : catalogId(input.productId, "sản phẩm");
-  const requestedCategory = input.categoryId === undefined ? undefined : catalogId(input.categoryId, "danh mục");
-  if (!productId && !requestedCategory) throw new AppError("Vui lòng chọn danh mục hoặc sản phẩm.", 400);
-  const product = productId
-    ? await Product.findOne({ _id: productId, status: true }).select("name category_id").lean()
-    : null;
-  if (productId && (!product || (requestedCategory && !requestedCategory.equals(product.category_id)))) {
-    throw new AppError("Sản phẩm không thuộc danh mục hoặc đã ngừng bán.", 404);
-  }
-  const categoryId = requestedCategory ?? product?.category_id ?? undefined;
-  const categories = categoryId ? await Category.find().select("name parent_id status").lean() : [];
-  const category = categoryId && visibleCategoryIds(categories).has(String(categoryId))
-    ? categories.find((entry) => categoryId.equals(entry._id))
-    : undefined;
-  if (!product && !category) throw new AppError("Danh mục không còn hiển thị.", 404);
-  const [productRows, categoryRows] = await Promise.all([
-    productId ? ProductSizeChart.find({ product_id: productId }).lean() : [],
-    category?._id ? SizeRecommendation.find({ category_id: category._id }).lean() : [],
-  ]);
-  const rows: SizeChartRow[] = productRows.length ? productRows : categoryRows;
-  const source = productRows.length ? "product" : categoryRows.length ? "category" : "unavailable";
-  return { category, product, categoryRows, rows: rows.sort(compareSizes), source };
-}
 
 export class CatalogController {
   static async getBestSellers(_req: Request, res: Response, next: NextFunction) {
@@ -120,45 +87,8 @@ export class CatalogController {
   static async recommendSize(req: Request, res: Response, next: NextFunction) {
     try {
       const input: Record<string, unknown> = req.method === "GET" ? req.query : req.body ?? {};
-      const fit = readFit(input.fit);
-      const measurements = readMeasurements(input, req.method === "GET");
-      const { rows, source, product, category, categoryRows } = await sizeScope(input);
-      const fields = chartMeasurements(rows, fit);
-      if (fields.some(({ key, required }) => required && measurements[key] === undefined)) {
-        throw new AppError("Vui lòng nhập đầy đủ số đo bắt buộc của bảng kích cỡ.", 400);
-      }
-      const matches = matchSizeChart(rows, fit, measurements);
-      const primary = matches[0]?.size;
-      const candidates = primary && category
-        ? await Product.find({ category_id: category._id, status: true }).select("_id").lean()
-        : product ? [product] : [];
-      const [variants, otherCharts] = primary ? await Promise.all([
-        Variant.find({ product_id: { $in: candidates.map((item) => item._id) }, status: true, stock_quantity: { $gt: 0 } })
-          .select("product_id size").lean(),
-        ProductSizeChart.find({ product_id: { $in: candidates.map((item) => item._id) } }).lean(),
-      ]) : [[], []] as const;
-      const chartsByProduct = new Map<string, SizeChartRow[]>();
-      for (const row of otherCharts) {
-        const id = String(row.product_id);
-        const list = chartsByProduct.get(id) ?? [];
-        list.push(row);
-        chartsByProduct.set(id, list);
-      }
-      const categoryMatches = matchSizeChart(categoryRows, fit, measurements).some((row) => row.size === primary);
-      const eligible = new Set(candidates.filter((item) => {
-        if (product?._id.equals(item._id)) return true;
-        const ownChart = chartsByProduct.get(String(item._id));
-        return ownChart
-          ? matchSizeChart(ownChart, fit, measurements).some((row) => row.size === primary)
-          : categoryMatches;
-      }).map((item) => String(item._id)));
-      const productIds = [...new Set(variants.filter((item) =>
-        eligible.has(String(item.product_id)) && item.size.trim().toUpperCase() === primary,
-      ).map((item) => String(item.product_id)))];
-      res.set("Cache-Control", "no-store").json({
-        status: "success", data: matches.map((row) => row.size),
-        recommendation: { source, name: product?.name ?? category?.name, rows, match: matches[0], productIds },
-      });
+      const { sizes, recommendation } = await recommendCatalogSize(input, req.method === "GET");
+      res.set("Cache-Control", "no-store").json({ status: "success", data: sizes, recommendation });
     } catch (error) {
       next(error);
     }

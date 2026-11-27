@@ -33,6 +33,8 @@ export async function addCartItem(
   quantity: number,
   token: string,
   outfit?: { id: string; productId: string },
+  signal?: AbortSignal,
+  quote?: { unitPrice: number; stock?: number },
 ): Promise<CartItem> {
   if (!token) {
     throw new Error("Vui lòng đăng nhập trước khi thêm vào giỏ hàng.");
@@ -44,6 +46,7 @@ export async function addCartItem(
 
   const response = await fetch(`${API_BASE_URL}/cart/items`, {
     method: "POST",
+    signal,
     headers: {
       ...authenticatedHeaders(token),
       "Content-Type": "application/json",
@@ -51,6 +54,7 @@ export async function addCartItem(
     body: JSON.stringify({
       product_variant_id: productVariantId,
       quantity,
+      ...(quote ? { expected_unit_price: quote.unitPrice, expected_stock: quote.stock } : {}),
       ...(outfit ? { source_outfit_id: outfit.id, product_id: outfit.productId } : {}),
     }),
   });
@@ -75,10 +79,11 @@ export interface ProductVariant {
 
 export async function getProductVariants(
   productId: string,
+  signal?: AbortSignal,
 ): Promise<ProductVariant[]> {
   const response = await fetch(
     `${API_BASE_URL}/products/${encodeURIComponent(productId)}/variants`,
-    { cache: "no-store" },
+    { cache: "no-store", signal },
   );
 
   return readApiResponse<ProductVariant[]>(response);

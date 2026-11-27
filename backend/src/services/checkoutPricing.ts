@@ -116,6 +116,25 @@ export async function calculateCouponDiscount(code: string, subtotal: number, se
   return { couponId: coupon._id, discount };
 }
 
+export async function previewCouponDiscount(code: string, subtotal: number) {
+  try {
+    return await calculateCouponDiscount(code, subtotal);
+  } catch (error) {
+    if (!(error instanceof AppError) || error.statusCode !== 400) throw error;
+  }
+  const now = new Date();
+  const coupon = await Coupon.findOne({ code }).select("status start_date end_date used_count usage_limit min_order_value").lean();
+  if (!coupon || !coupon.status) throw new AppError("Mã giảm giá không còn hiệu lực.", 400);
+  if (!(coupon.start_date <= now)) throw new AppError("Mã giảm giá chưa đến thời gian áp dụng.", 400);
+  if (!(coupon.end_date >= now)) throw new AppError("Mã giảm giá đã hết hạn.", 400);
+  if (!(coupon.used_count < coupon.usage_limit)) throw new AppError("Mã giảm giá đã hết lượt sử dụng.", 400);
+  if (!Number.isFinite(coupon.min_order_value)) throw new AppError("Mức đơn tối thiểu của mã chưa được cấu hình.", 400);
+  if (coupon.min_order_value > subtotal) {
+    throw new AppError(`Đơn hàng chưa đạt mức tối thiểu ${coupon.min_order_value.toLocaleString("vi-VN")} ₫.`, 400);
+  }
+  throw new AppError("Mã giảm giá hiện chưa áp dụng được. Bạn có thể đối chiếu tại checkout.", 400);
+}
+
 export async function reserveCouponUse(couponId: Types.ObjectId | null, session: ClientSession) {
   if (!couponId) return;
   const { matchedCount } = await Coupon.updateOne(

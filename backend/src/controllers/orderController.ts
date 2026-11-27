@@ -14,6 +14,7 @@ import { AppError } from "../middlewares/AppError.js";
 import type { AuthRequest } from "../middlewares/authMiddleware.js";
 import { checkoutPaymentMethodIssue, configuredPaymentMethods, isPaymentMethodConfigured, isSupportedPaymentMethod } from "../config/paymentMethods.js";
 import { calculateCheckoutPrice, checkoutDestination, checkoutSnapshot, readCheckoutOptions, reserveCouponUse, restoreCouponUse, type CheckoutSnapshotLine } from "../services/checkoutPricing.js";
+import { getCheckoutCart } from "../services/checkoutCart.js";
 import { restoreOrderStock } from "../services/orderStock.js";
 
 const customerCancelState = { order_status: "pending", payment_method: "COD", payment_status: "pending" } as const;
@@ -24,7 +25,7 @@ function canCustomerCancel(order: Pick<IOrder, "order_status" | "payment_status"
     order.payment_method === customerCancelState.payment_method && order.payment_status === customerCancelState.payment_status;
 }
 
-function customerOrderActions(order: Pick<IOrder, "order_status" | "payment_status" | "payment_method" | "final_amount">) {
+export function customerOrderActions(order: Pick<IOrder, "order_status" | "payment_status" | "payment_method" | "final_amount">) {
   return {
     cancel: canCustomerCancel(order),
     pay: order.order_status === "pending" && order.payment_status === "pending" && order.payment_method !== "COD" &&
@@ -48,42 +49,7 @@ export class OrderController {
         if (!address) throw new AppError("Không tìm thấy địa chỉ giao hàng", 404);
         destination = checkoutDestination(address);
       }
-      const cart = await Cart.findOne({ user_id: req.user._id }).select("_id").lean();
-      const items = cart ? await CartDetail.find({ cart_id: cart._id })
-        .populate<{ product_variant_id: Pick<InstanceType<typeof ProductVariant>, "_id" | "product_id" | "sku" | "size" | "color" | "price" | "sale_price" | "status" | "stock_quantity"> | null }>(
-          "product_variant_id", "product_id sku size color price sale_price status stock_quantity",
-        ).lean() : [];
-      const productIds = [...new Set(items.map(({ product_variant_id }) => product_variant_id?.product_id).filter(Boolean).map(String))];
-      const activeProducts = productIds.length ? await Product.find({ _id: { $in: productIds }, status: true }).select("_id").lean() : [];
-      const sellable = new Set(activeProducts.map(({ _id }) => String(_id)));
-      const quotedQuantities = new Map<string, number>();
-      const rows: CheckoutSnapshotLine[] = items.map((item) => {
-        const variant = item.product_variant_id;
-        if (!variant?.status || !sellable.has(String(variant.product_id)) || item.outfit_id != null) {
-          throw new AppError("Có dòng sản phẩm không còn đặt được. Vui lòng cập nhật giỏ hàng.", 409);
-        }
-        const unitPrice = variant.sale_price ?? variant.price;
-        if (!Number.isSafeInteger(unitPrice) || unitPrice < 0 || !Number.isSafeInteger(item.quantity) || item.quantity < 1) {
-          throw new AppError("Giá hoặc số lượng trong giỏ hàng không hợp lệ.", 400);
-        }
-        const variantId = String(variant._id);
-        const quantity = (quotedQuantities.get(variantId) ?? 0) + item.quantity;
-        if (!Number.isSafeInteger(quantity) || !Number.isSafeInteger(variant.stock_quantity) || variant.stock_quantity < quantity) {
-          throw new AppError("Sản phẩm không đủ tồn kho. Vui lòng cập nhật giỏ hàng.", 409);
-        }
-        quotedQuantities.set(variantId, quantity);
-        return {
-          id: String(item._id),
-          variant_id: variantId,
-          sku: variant.sku,
-          size: variant.size,
-          color: variant.color,
-          quantity: item.quantity,
-          unit_price: unitPrice,
-        };
-      });
-      const subtotal = rows.reduce((sum, line) => sum + line.unit_price * line.quantity, 0);
-      if (!Number.isSafeInteger(subtotal)) throw new AppError("Tổng tiền không hợp lệ.", 400);
+      const { rows, subtotal } = await getCheckoutCart(req.user._id);
       const pricing = await calculateCheckoutPrice(subtotal, { ...options, location: destination });
       const { couponId: _couponId, ...price } = pricing;
       const configured = configuredPaymentMethods();

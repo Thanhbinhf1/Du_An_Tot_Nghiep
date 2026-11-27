@@ -54,9 +54,6 @@ export default function ProductCard({ product, recommendedSize }: { product: Pro
         {isOutOfStock && <div className="product-card-badges">
           <span className="badge badge-out">{hasVariants ? "Hết hàng" : "Chưa mở bán"}</span>
         </div>}
-        {!isOutOfStock && discountPercent > 0 && <div className="product-card-badges">
-          <span className="badge badge-sale">−{discountPercent}%</span>
-        </div>}
       </div>
 
       <div className="product-card-actions">
@@ -98,6 +95,9 @@ export default function ProductCard({ product, recommendedSize }: { product: Pro
             <del className="price-original">{formatVnd(originalPrice)}</del>
           )}
         </div>
+        {isOnSale && discountPercent > 0 && (
+          <p className="product-sale-note">Ưu đãi có giới hạn (−{discountPercent}%)</p>
+        )}
 
         {displayRating > 0 && (
           <div className="product-card-footer">

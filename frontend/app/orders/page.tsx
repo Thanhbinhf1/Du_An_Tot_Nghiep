@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { useDemoAuth } from "@/lib/demo-auth";
 import CancelOrderButton from "@/components/orders/CancelOrderButton";
+import RequestReturnButton from "@/components/orders/RequestReturnButton";
 import {
   getMyBackendOrders,
   orderStatusText,
@@ -29,7 +30,7 @@ const orderTabs: { id: "all" | OrderStatus; label: string }[] = [
 ];
 
 export default function BackendOrdersPage() {
-  const { token, isHydrated } = useDemoAuth();
+  const { token, account, isHydrated } = useDemoAuth();
   if (!isHydrated) {
     return <section className="container" style={{ padding: "40px 0" }}><p role="status">Đang kiểm tra đăng nhập...</p></section>;
   }
@@ -40,10 +41,10 @@ export default function BackendOrdersPage() {
       <Link href="/dang-nhap" className="pill-button dark">Đăng nhập ngay</Link>
     </section>;
   }
-  return <AccountOrders key={token} token={token} />;
+  return <AccountOrders key={token} token={token} account={account} />;
 }
 
-function AccountOrders({ token }: { token: string }) {
+function AccountOrders({ token, account }: { token: string; account?: string }) {
   const mounted = useRef(false);
   const [orders, setOrders] = useState<BackendOrder[]>([]);
   const [activeTab, setActiveTab] = useState<"all" | OrderStatus>("all");
@@ -328,11 +329,20 @@ function AccountOrders({ token }: { token: string }) {
                       <CancelOrderButton orderId={order._id} token={token} onCancelled={handleCancelled} />
                     )}
 
-                    {/* Đánh giá sản phẩm khi đơn hoàn thành */}
+                    {/* Đánh giá & Đổi/trả sản phẩm khi đơn hoàn thành */}
                     {isCompleted && (
-                      <Link className="pill-button dark small-pill" href={`/orders/${encodeURIComponent(order._id)}#danh-gia`} scroll={false}>
-                        ★ Chọn sản phẩm để đánh giá
-                      </Link>
+                      <>
+                        <RequestReturnButton
+                          orderId={order._id}
+                          receiverName={order.receiver_name}
+                          userEmail={account}
+                          token={token}
+                          onSubmitted={(ticketId) => setCancelSuccess(`Đã gửi yêu cầu đổi/trả cho đơn #${order._id.slice(-8).toUpperCase()} (Mã hồ sơ: ${ticketId}).`)}
+                        />
+                        <Link className="pill-button dark small-pill" href={`/orders/${encodeURIComponent(order._id)}#danh-gia`} scroll={false}>
+                          ★ Chọn sản phẩm để đánh giá
+                        </Link>
+                      </>
                     )}
                   </div>
                 </div>

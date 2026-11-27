@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { API_BASE_URL, authenticatedHeaders, readApiResponse } from "@/lib/api";
+import { API_BASE_URL, authenticatedHeaders, readApiResponse, resolveProductImage } from "@/lib/api";
 import { useDemoAuth } from "@/lib/demo-auth";
 import { reviewReportReasons } from "@/lib/review-reports";
 
@@ -52,6 +52,8 @@ function ReviewSection({ productId, token }: { productId: string; token: string 
   const [comment, setComment] = useState("");
   const [imageUrlInput, setImageUrlInput] = useState("");
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [starFilter, setStarFilter] = useState<number | "all">("all");
   const [previewImage, setPreviewImage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -131,6 +133,45 @@ function ReviewSection({ productId, token }: { productId: string; token: string 
     setError("");
     setAttachedImages((prev) => [...prev, trimmed]);
     setImageUrlInput("");
+  }
+
+  async function handleUploadFiles(files: FileList | null) {
+    if (!files || files.length === 0 || !token) return;
+    const remaining = 3 - attachedImages.length;
+    if (remaining <= 0) {
+      setError("Tối đa đính kèm 3 hình ảnh cho mỗi đánh giá.");
+      return;
+    }
+    const chosen = Array.from(files).slice(0, remaining);
+    setError("");
+    setUploadingImage(true);
+    try {
+      const uploadedUrls: string[] = [];
+      for (const file of chosen) {
+        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+          throw new Error("Chỉ chấp nhận ảnh JPG, PNG hoặc WebP.");
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          throw new Error("Mỗi ảnh tải lên không được vượt quá 5 MB.");
+        }
+        const formData = new FormData();
+        formData.append("image", file);
+        const response = await fetch(`${API_BASE_URL}/reviews/upload-image`, {
+          method: "POST",
+          headers: authenticatedHeaders(token),
+          body: formData,
+        });
+        const data = await readApiResponse<{ url: string }>(response);
+        if (data?.url) uploadedUrls.push(data.url);
+      }
+      if (uploadedUrls.length > 0) {
+        setAttachedImages((prev) => [...prev, ...uploadedUrls].slice(0, 3));
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Không thể tải ảnh đánh giá lên.");
+    } finally {
+      setUploadingImage(false);
+    }
   }
 
   async function submitReview(event: FormEvent<HTMLFormElement>) {
@@ -270,25 +311,50 @@ function ReviewSection({ productId, token }: { productId: string; token: string 
 
           <div className="review-image-attach">
             <label className="product-review-label" htmlFor={`review-image-${productId}`}>
-              Hình ảnh đánh giá (tùy chọn)
+              Hình ảnh đánh giá (tối đa 3 ảnh)
             </label>
             <div className="review-image-input-row">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                hidden
+                onChange={(event) => {
+                  const files = event.target.files;
+                  void handleUploadFiles(files);
+                  event.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="pill-button"
+                disabled={uploadingImage || attachedImages.length >= 3}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {uploadingImage ? "Đang tải ảnh…" : "📷 Tải ảnh từ máy"}
+              </button>
               <input
                 id={`review-image-${productId}`}
                 inputMode="url"
                 value={imageUrlInput}
                 onChange={(event) => setImageUrlInput(event.target.value)}
-                placeholder="Dán link ảnh thực tế sản phẩm (https://...)"
+                placeholder="Hoặc dán link ảnh (https://...)"
               />
-              <button type="button" className="pill-button" onClick={handleAddImageUrl}>
-                + Thêm ảnh
+              <button
+                type="button"
+                className="pill-button"
+                disabled={uploadingImage || attachedImages.length >= 3 || !imageUrlInput.trim()}
+                onClick={handleAddImageUrl}
+              >
+                + Thêm link
               </button>
             </div>
             {attachedImages.length > 0 && (
               <div className="review-attached-previews">
                 {attachedImages.map((imgUrl, index) => (
                   <div className="review-attached-thumb" key={`${imgUrl}-${index}`}>
-                    <img src={imgUrl} alt={`Ảnh đính kèm ${index + 1}`} />
+                    <img src={resolveProductImage(imgUrl)} alt={`Ảnh đính kèm ${index + 1}`} />
                     <button
                       type="button"
                       aria-label="Xóa ảnh đính kèm"
@@ -359,17 +425,20 @@ function ReviewSection({ productId, token }: { productId: string; token: string 
                 <p className="product-review-comment">{parsed.text}</p>
                 {allImages.length > 0 && (
                   <div className="product-review-images">
-                    {allImages.map((imgUrl, idx) => (
-                      <button
-                        key={`${imgUrl}-${idx}`}
-                        type="button"
-                        className="review-photo-btn"
-                        onClick={() => setPreviewImage(imgUrl)}
-                        aria-label="Phóng to ảnh đánh giá"
-                      >
-                        <img src={imgUrl} alt={`Ảnh đánh giá từ ${review.user_name}`} loading="lazy" />
-                      </button>
-                    ))}
+                    {allImages.map((imgUrl, idx) => {
+                      const resolved = resolveProductImage(imgUrl);
+                      return (
+                        <button
+                          key={`${imgUrl}-${idx}`}
+                          type="button"
+                          className="review-photo-btn"
+                          onClick={() => setPreviewImage(resolved)}
+                          aria-label="Phóng to ảnh đánh giá"
+                        >
+                          <img src={resolved} alt={`Ảnh đánh giá từ ${review.user_name}`} loading="lazy" />
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 {reported.includes(review._id) ? (

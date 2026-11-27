@@ -232,12 +232,16 @@ test("CQA-SEPAY journals verified payment exactly once without a new stock or co
   const before = await checkoutState();
   const payment = await db.collection("payments").findOne({ order_id: oid(created.order_id) });
   const data = { id: randomInt(1_000_000_000, 9_000_000_000), gateway: payment.sepay_bank_code,
-    accountNumber: payment.sepay_account_number, content: `SEVQR ${payment.sepay_payment_code}`,
+    accountNumber: payment.sepay_account_number, code: payment.sepay_payment_code, content: `SEVQR ${payment.sepay_payment_code}`,
     transferType: "in", transferAmount: created.total_amount, referenceCode: `QA-${payment._id}` };
   const send = () => fetch(`${state.api}/payments/sepay/webhook`, {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Apikey ${state.sepayKey}` }, body: JSON.stringify(data),
   });
-  expect((await Promise.all([send(), send()])).map(({ status }) => status)).toEqual([200, 200]);
+  const deliveries = await Promise.all([send(), send()]);
+  for (const response of deliveries) {
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true });
+  }
   expect((await db.collection("orders").findOne(byId(created.order_id)))).toMatchObject({ order_status: "pending", payment_status: "success", final_amount: created.total_amount });
   expect((await historyOf(created.order_id)).filter(({ note }) => /SePay xác nhận đã thu tiền/.test(note))).toHaveLength(1);
   expect(await checkoutState()).toEqual({ ...before, history: before.history + 1 });

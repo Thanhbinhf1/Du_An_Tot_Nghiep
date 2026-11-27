@@ -84,7 +84,7 @@ export class CartController {
         throw new AppError("Bạn chưa đăng nhập", 401);
       }
 
-      const { product_variant_id, quantity, source_outfit_id, product_id } = req.body ?? {};
+      const { product_variant_id, quantity, source_outfit_id, product_id, expected_unit_price, expected_stock } = req.body ?? {};
 
       if (
         typeof product_variant_id !== "string" ||
@@ -96,6 +96,9 @@ export class CartController {
       if (!Number.isSafeInteger(quantity) || quantity < 1) {
         throw new AppError("Số lượng phải là số nguyên lớn hơn 0", 400);
       }
+      if ([expected_unit_price, expected_stock].some((value) => value !== undefined && (!Number.isSafeInteger(value) || value < 0))) {
+        throw new AppError("Giá hoặc tồn kho xác nhận không hợp lệ.", 400);
+      }
 
       const variant = await ProductVariant.findById(product_variant_id);
 
@@ -106,8 +109,21 @@ export class CartController {
         );
       }
 
-      if (!(await Product.exists({ _id: variant.product_id, status: true }))) {
+      const confirmingQuote = expected_unit_price !== undefined || expected_stock !== undefined;
+      if (!(await Product.exists({ _id: variant.product_id, status: true,
+        ...(confirmingQuote ? { publication_state: { $nin: ["draft", "hidden"] } } : {}),
+      }))) {
         throw new AppError("Sản phẩm không tồn tại hoặc đã ngừng bán", 404);
+      }
+      if (confirmingQuote) {
+        const price = variant.sale_price ?? variant.price;
+        if (!Number.isSafeInteger(price) || price < 0) throw new AppError("Giá hiện tại của biến thể không hợp lệ.", 409);
+        if (expected_unit_price !== undefined && price !== expected_unit_price) {
+          throw new AppError("Giá của biến thể đã thay đổi. Hãy kiểm tra giá mới trước khi thêm.", 409);
+        }
+        if (expected_stock !== undefined && variant.stock_quantity !== expected_stock) {
+          throw new AppError("Tồn kho của biến thể đã thay đổi. Hãy kiểm tra số lượng trước khi thêm.", 409);
+        }
       }
 
       if (source_outfit_id !== undefined || product_id !== undefined) {
@@ -156,7 +172,7 @@ export class CartController {
       // The compound unique index also protects simultaneous first inserts.
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const existingItem = await CartDetail.findOne(itemFilter);
-        const legacyLines = source_outfit_id === undefined ? [] : await CartDetail.find({
+        const legacyLines = source_outfit_id === undefined && !confirmingQuote ? [] : await CartDetail.find({
           cart_id: cart._id, product_variant_id: variantId, outfit_id: { $ne: null },
         }).select("quantity").lean();
         const total = legacyLines.reduce((sum, line) => sum + line.quantity, (existingItem?.quantity ?? 0) + quantity);

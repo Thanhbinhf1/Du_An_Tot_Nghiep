@@ -12,7 +12,7 @@ export default defineConfig({
     ["html", { open: "never", outputFolder: targetedRun ? "e2e/.runtime/targeted-html" : "playwright-report" }],
     ["./e2e/report.mjs"],
   ],
-  use: { baseURL: "http://127.0.0.1:3101", actionTimeout: 10_000, navigationTimeout: 20_000, trace: "retain-on-failure", screenshot: "only-on-failure" },
+  use: { baseURL: "http://127.0.0.1:3101", actionTimeout: 10_000, navigationTimeout: 20_000, trace: "retain-on-failure", screenshot: "only-on-failure", ...(process.env.E2E_CHROMIUM_CHANNEL ? { channel: process.env.E2E_CHROMIUM_CHANNEL } : {}) },
   projects: [
     { name: "desktop-chromium", use: { browserName: "chromium", viewport: { width: 1440, height: 900 } } },
     { name: "mobile-chromium", use: { ...devices["iPhone 13"], defaultBrowserType: "chromium" } },

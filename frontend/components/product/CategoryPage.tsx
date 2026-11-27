@@ -12,6 +12,7 @@ import { useCatalogCategories } from "@/lib/useCatalogCategories";
 import { STORE_NAME } from "@/lib/store-brand";
 import { getAudienceName, getCategoryTree } from "@/lib/catalog-audience";
 import { featuredRatingSort } from "@/lib/product-sorting";
+import { matchesCatalogFilter } from "@/lib/catalog-filter";
 
 const PAGE_SIZE = 12;
 
@@ -63,31 +64,10 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
     const min = minimumPrice === "" ? undefined : Number(minimumPrice);
     const max = maximumPrice === "" ? undefined : Number(maximumPrice);
     const filtered = categoryProducts.filter((product) => {
-      const matchesColorAndSize =
-        (!selectedColors.length && !selectedSizes.length) ||
-        product.variants?.some(
-          (variant) =>
-            (!selectedColors.length || selectedColors.includes(variant.color)) &&
-            (!selectedSizes.length || selectedSizes.includes(variant.size)),
-        );
       const matchesBrand = !selectedBrands.length || selectedBrands.includes(product.brand ?? STORE_NAME);
-      const isOutOfStock = product.variants?.length === 0 || product.inStock === false;
-      const isOnSale =
-        Boolean(product.discountPercent && product.discountPercent > 0) ||
-        Boolean(product.originalPrice && product.originalPrice > product.price);
-      const matchesStatus =
-        statusFilter === "all" ||
-        (statusFilter === "instock" && !isOutOfStock) ||
-        (statusFilter === "outofstock" && isOutOfStock) ||
-        (statusFilter === "sale" && isOnSale);
-
-      return (
-        matchesColorAndSize &&
-        matchesBrand &&
-        matchesStatus &&
-        (min === undefined || (Number.isFinite(min) && product.price >= min)) &&
-        (max === undefined || (Number.isFinite(max) && product.price <= max))
-      );
+      return matchesBrand && matchesCatalogFilter(product, {
+        sizes: selectedSizes, colors: selectedColors, min: min ?? 0, max: max ?? Infinity, status: statusFilter,
+      });
     });
 
     if (sort === "price-asc") filtered.sort((first, second) => first.price - second.price);
@@ -147,11 +127,11 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
       )}
       {(loading || loadingCategories) && <p role="status">Đang tải danh mục...</p>}
       {categories && !categoryName && !categoryLoadError && <p>Không tìm thấy danh mục.</p>}
-      <div className={categoryProducts.length ? "category-results has-filters" : "category-results"}>
+      <div className="category-results">
       {categoryProducts.length > 0 && <div className="store-catalog-controls">
-        <p className="catalog-result-count" aria-live="polite">Tìm thấy {visibleProducts.length} sản phẩm</p>
+        <p className="catalog-result-count" aria-live="polite">Kết quả: {visibleProducts.length} sản phẩm</p>
         <label className="store-catalog-sort">
-          Sắp xếp
+          Sắp xếp theo
           <select
             value={sort}
             onChange={(event) => changeCatalogFilters({ sort: event.target.value === "featured" ? "" : event.target.value })}
@@ -163,7 +143,7 @@ export default function CategoryPage({ slug, audience }: { slug: string; audienc
             <option value="price-desc">Giá: cao đến thấp</option>
           </select>
         </label>
-        <CatalogFilterDrawer desktopSidebar active={hasActiveFilters} count={visibleProducts.length} onReset={clearFilters}>
+        <CatalogFilterDrawer active={hasActiveFilters} count={visibleProducts.length} onReset={clearFilters}>
           <div className="catalog-toolbar category-filter-panel">
             <details className="category-filter">
               <summary>

@@ -313,7 +313,7 @@
   font-weight: 600;
 }
 
-.admin-form input,
+.admin-form input:not([type="checkbox"]):not([type="radio"]),
 .admin-form select,
 .admin-form textarea {
   width: 100%;
@@ -326,6 +326,28 @@
   font-size: 12px;
   font-weight: 400;
   transition: border-color .16s ease, box-shadow .16s ease;
+}
+
+.admin-form input[type="checkbox"],
+.admin-form input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: #0f6b4b;
+  cursor: pointer;
+}
+
+.admin-form label:has(> input[type="checkbox"]),
+.admin-form label:has(> input[type="radio"]) {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  cursor: pointer;
 }
 
 .admin-form input:focus,

@@ -10,6 +10,7 @@ import { API_BASE_URL, readApiResponse, type ApiBrand } from "@/lib/api";
 import { STORE_NAME } from "@/lib/store-brand";
 import { useCatalogCategories } from "@/lib/useCatalogCategories";
 import { useCatalogProducts } from "@/lib/useCatalogProducts";
+import { matchesCatalogFilter } from "@/lib/catalog-filter";
 
 const PAGE_SIZE = 12;
 
@@ -25,10 +26,10 @@ const quickTypeChips = [
 
 const priceRanges = [
   { id: "all", label: "Tất cả mức giá", min: 0, max: Infinity },
-  { id: "under-300", label: "Dưới 300.000đ", min: 0, max: 300_000 },
+  { id: "under-300", label: "Dưới 300.000đ", min: 0, max: 299_999 },
   { id: "300-500", label: "300.000đ – 500.000đ", min: 300_000, max: 500_000 },
   { id: "500-1000", label: "500.000đ – 1.000.000đ", min: 500_000, max: 1_000_000 },
-  { id: "above-1000", label: "Trên 1.000.000đ", min: 1_000_000, max: Infinity },
+  { id: "above-1000", label: "Trên 1.000.000đ", min: 1_000_001, max: Infinity },
 ];
 
 export default function ProductListing({ searchMode = false }: { searchMode?: boolean }) {
@@ -115,39 +116,14 @@ export default function ProductListing({ searchMode = false }: { searchMode?: bo
         product.category.toLocaleLowerCase("vi") === category.toLocaleLowerCase("vi") ||
         product.name.toLocaleLowerCase("vi").includes(category.toLocaleLowerCase("vi"));
 
-      const matchesMaxPrice = maxPrice === undefined || product.price <= maxPrice;
-      const matchesPriceRange = product.price >= activeRange.min && product.price <= activeRange.max;
-
-      const matchesVariant = (!selectedSize && !selectedColor) || product.variants?.some(
-        (variant) => (!selectedSize || variant.size === selectedSize) &&
-          (!selectedColor || variant.color === selectedColor),
-      );
-
       const matchesBrand =
         !selectedBrand ||
         (product.brand ?? STORE_NAME).toLocaleLowerCase("vi") === selectedBrand.toLocaleLowerCase("vi");
 
-      const isOutOfStock = product.variants?.length === 0 || product.inStock === false;
-      const isOnSale =
-        Boolean(product.discountPercent && product.discountPercent > 0) ||
-        Boolean(product.originalPrice && product.originalPrice > product.price);
-
-      const matchesStatus =
-        statusFilter === "all" ||
-        (statusFilter === "featured" && product.isFeatured) ||
-        (statusFilter === "instock" && !isOutOfStock) ||
-        (statusFilter === "outofstock" && isOutOfStock) ||
-        (statusFilter === "sale" && isOnSale);
-
-      return (
-        matchesQuery &&
-        matchesCategory &&
-        matchesMaxPrice &&
-        matchesPriceRange &&
-        matchesVariant &&
-        matchesBrand &&
-        matchesStatus
-      );
+      return matchesQuery && matchesCategory && matchesBrand && matchesCatalogFilter(product, {
+        sizes: selectedSize ? [selectedSize] : [], colors: selectedColor ? [selectedColor] : [],
+        min: activeRange.min, max: Math.min(activeRange.max, maxPrice ?? Infinity), status: statusFilter,
+      });
     });
 
     if (sort === "price-asc") filtered.sort((a, b) => a.price - b.price);

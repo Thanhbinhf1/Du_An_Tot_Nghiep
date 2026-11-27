@@ -2,21 +2,43 @@ import type { NextFunction, Request, Response } from "express";
 import { AppError } from "../middlewares/AppError.js";
 import Setting from "../models/settingModel.js";
 
-type Hero = { title: string; accent: string; description: string; ctaLabel: string; ctaHref: string; image: string };
+type CollectionVideos = {
+  newArrivals?: string;
+  featured?: string;
+  sale?: string;
+};
+type Hero = {
+  title: string;
+  accent: string;
+  description: string;
+  ctaLabel: string;
+  ctaHref: string;
+  image: string;
+  collectionVideos?: CollectionVideos;
+};
 type Content = { revision: number; hero: Hero | null };
 
 const key = "storefront_home_hero";
+const BANNER_MEDIA_PATTERN = /^\/(?:images\/banner\/[\w-]+|videos\/[\w-]+|uploads\/[0-9a-f-]{36})\.(?:jpg|jpeg|png|webp|mp4|webm|mov)$/i;
 
 async function read(): Promise<Content> {
   const setting = await Setting.findOne({ key }).select("value").lean();
   return setting ? setting.value as Content : { revision: 0, hero: null };
 }
 
+function parseOptionalMedia(value: unknown, label: string): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || value.trim().length > 200 || !BANNER_MEDIA_PATTERN.test(value.trim())) {
+    throw new AppError(`Định dạng media cho ${label} không hợp lệ.`, 400);
+  }
+  return value.trim();
+}
+
 function parseHero(value: unknown): Hero | null {
   if (value === null) return null;
   if (typeof value !== "object" || !value || Array.isArray(value)) throw new AppError("Nội dung banner không hợp lệ.", 400);
   const input = value as Record<string, unknown>;
-  function field(name: keyof Hero, label: string, maximum: number, optional = false) {
+  function field(name: keyof Omit<Hero, "collectionVideos">, label: string, maximum: number, optional = false) {
     const original = input[name];
     if (typeof original !== "string" || original.trim().length > maximum || (!optional && !original.trim())) {
       throw new AppError("Kiểm tra " + label + " của banner.", 400);
@@ -29,16 +51,31 @@ function parseHero(value: unknown): Hero | null {
   if (!ctaHref.startsWith("/") || ctaHref.startsWith("//") || ctaHref.includes("\\") || !link || link.origin !== origin) {
     throw new AppError("Liên kết banner phải bắt đầu bằng / và trỏ tới một trang trong cửa hàng.", 400);
   }
-  const image = field("image", "hình ảnh", 200);
-  if (!/^\/(?:images\/banner\/[\w-]+|uploads\/[0-9a-f-]{36})\.(?:jpg|jpeg|png|webp)$/i.test(image)) {
-    throw new AppError("Chọn ảnh banner có sẵn hoặc tải ảnh banner lên.", 400);
+  const image = field("image", "ảnh/video banner", 200);
+  if (!BANNER_MEDIA_PATTERN.test(image)) {
+    throw new AppError("Chọn ảnh/video banner có sẵn hoặc tải ảnh (JPG/PNG/WebP) / video ngắn (MP4/WebM/MOV) lên.", 400);
+  }
+  const rawVideos = input.collectionVideos;
+  let collectionVideos: CollectionVideos | undefined;
+  if (rawVideos && typeof rawVideos === "object" && !Array.isArray(rawVideos)) {
+    const map = rawVideos as Record<string, unknown>;
+    const parsed: CollectionVideos = {};
+    const newArrivals = parseOptionalMedia(map.newArrivals, "banner Sản phẩm mới");
+    const featured = parseOptionalMedia(map.featured, "banner Sản phẩm nổi bật");
+    const sale = parseOptionalMedia(map.sale, "banner Đang ưu đãi");
+    if (newArrivals) parsed.newArrivals = newArrivals;
+    if (featured) parsed.featured = featured;
+    if (sale) parsed.sale = sale;
+    if (Object.keys(parsed).length > 0) collectionVideos = parsed;
   }
   return {
     title: field("title", "tiêu đề", 50),
     accent: field("accent", "dòng nhấn", 50, true),
     description: field("description", "mô tả", 160),
     ctaLabel: field("ctaLabel", "tên nút", 40),
-    ctaHref, image,
+    ctaHref,
+    image,
+    ...(collectionVideos ? { collectionVideos } : {}),
   };
 }
 

@@ -166,8 +166,17 @@ export default function Header() {
   const rootCategories = defaultRootCategories.map((fallback) =>
     categories.find((item) => !item.parent_id && item.slug === fallback.slug) ?? fallback,
   );
+  const isHome = pathname === "/";
+  const isSolid = Boolean(openMenu || mobileMenuOpen || mobileSearchOpen || cartOpen);
+
   return (
-    <header ref={header} className="header storefront-header">
+    <header
+      ref={header}
+      className={`header storefront-header${isHome ? " storefront-header-transparent" : ""}${isSolid ? " storefront-header-solid" : ""}`}
+      onPointerLeave={(event) => {
+        if (event.pointerType === "mouse" && openMenu) setOpenMenu("");
+      }}
+    >
       <a href="#store-content" className="store-skip-link">Đến nội dung chính</a>
       <div className="nav site-nav">
         <Link href="/" className="logo" aria-label={`Trang chủ ${STORE_NAME}`} onClick={closeMenus}>
@@ -181,7 +190,11 @@ export default function Header() {
           aria-label="Danh mục"
         >
           <Link href="/products" className="nav-category-trigger nav-shop-link"
-            aria-current={pathname === "/products" ? "page" : undefined} onClick={closeMenus}>
+            aria-current={pathname === "/products" ? "page" : undefined}
+            onPointerEnter={(event) => {
+              if (event.pointerType === "mouse" && openMenu) setOpenMenu("");
+            }}
+            onClick={closeMenus}>
             Cửa hàng
           </Link>
           {rootCategories.map((category) => {
@@ -205,7 +218,14 @@ export default function Header() {
               >
                 <div className="nav-category-row">
                   <Link className="nav-category-trigger" href={href}
-                    aria-current={isCurrent ? "page" : undefined} onClick={closeMenus}>
+                    aria-current={isCurrent ? "page" : undefined}
+                    onPointerEnter={(event) => {
+                      if (event.pointerType === "mouse" && !window.matchMedia(compactQuery).matches) {
+                        setMobileSearchOpen(false);
+                        setOpenMenu(menu.length > 0 ? category.slug : "");
+                      }
+                    }}
+                    onClick={closeMenus}>
                     {category.name}
                   </Link>
                   {menu.length > 0 && <button
@@ -276,7 +296,14 @@ export default function Header() {
               <path d="m16 16 4.5 4.5" />
             </svg>
           </button>
-          {mobileSearchOpen && <SearchSuggestions query={searchQuery} categories={categories} onNavigate={closeMenus} />}
+          {mobileSearchOpen && (
+            <SearchSuggestions
+              query={searchQuery}
+              categories={categories}
+              onNavigate={closeMenus}
+              onClose={() => setMobileSearchOpen(false)}
+            />
+          )}
         </form>
 
         <div className="nav-actions">

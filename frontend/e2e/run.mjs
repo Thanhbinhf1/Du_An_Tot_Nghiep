@@ -22,6 +22,8 @@ const nextEnvPath = path.join(frontend, "next-env.d.ts");
 const nextEnvBefore = await readFile(nextEnvPath).catch(() => null);
 const env = { ...process.env, E2E_MODE: "1", NEXT_TELEMETRY_DISABLED: "1", NEXT_PUBLIC_API_URL: "http://127.0.0.1:5100/api", NEXT_PUBLIC_GOOGLE_CLIENT_ID: "", DOTENV_CONFIG_PATH: path.join(runtime, "unused-env-file"), NODE_ENV: "production" };
 env.HOST = "127.0.0.1";
+env.CHAT_OPENAI_API_KEY = "";
+env.CHAT_OPENAI_MODEL = "";
 env.UPLOAD_DIRECTORY = path.join(runtime, "uploads");
 const state = { api: "http://127.0.0.1:5100/api", web: "http://127.0.0.1:3101", password: `QaTest!${randomUUID()}`, jwtSecret: randomUUID(), vnpSecret: randomUUID(), momoSecret: randomUUID(), sepayKey: randomUUID() };
 

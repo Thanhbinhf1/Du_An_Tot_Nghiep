@@ -227,8 +227,8 @@ function CartContent({ token }: { token: string }) {
                         {stockRemaining <= 0
                           ? "Biến thể này đã hết hàng"
                           : stockRemaining <= 5
-                            ? `Sắp hết hàng (còn ${stockRemaining} SP)`
-                            : `Còn ${stockRemaining} sản phẩm trong kho`}
+                            ? "Sắp hết hàng"
+                            : "Còn hàng"}
                       </p>
                     )}
 
